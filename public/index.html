@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Raider TeleBot Dashboard</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #1e1e1e;
+      color: #fff;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+    }
+    #container {
+      display: flex;
+      width: 100%;
+      height: 100vh;
+    }
+    #logs {
+      background-color: #2a2a2a;
+      width: 300px;
+      height: 100%;
+      overflow-y: auto;
+      padding: 10px;
+      resize: horizontal;
+      min-width: 200px;
+      max-width: 50%;
+      font-size: 12px;
+    }
+    #logs p { margin: 3px 0; }
+    #logs .info { color: #00cc00; }
+    #logs .message { color: #ffcc00; }
+    #logs .error { color: #ff3333; }
+    #main {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto auto 1fr;
+      gap: 15px;
+    }
+    .panel {
+      background-color: #333;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    }
+    h1, h2 { margin: 0 0 10px; color: #fff; }
+    button {
+      padding: 8px 15px;
+      margin: 5px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:disabled { background-color: #555; }
+    #imageLog, #liveStatus, #userStats { max-height: 150px; overflow-y: auto; border: 1px solid #444; padding: 10px; font-size: 14px; }
+    canvas { max-height: 250px; }
+    #login {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background-color: #333;
+      padding: 20px;
+      border-radius: 8px;
+      display: none;
+    }
+    #login input { padding: 8px; margin: 10px 0; width: 200px; }
+  </style>
+</head>
+<body>
+  <div id="login">
+    <h1>Admin Login</h1>
+    <input type="password" id="adminPassword" placeholder="Enter admin password">
+    <button onclick="login()">Login</button>
+  </div>
+
+  <div id="container" style="display: none;">
+    <div id="logs"></div>
+    <div id="main">
+      <div class="panel">
+        <h2>Control Center</h2>
+        <button id="startBtn" onclick="startBot()">Start Bot</button>
+        <button id="stopBtn" onclick="stopBot()" disabled>Stop Bot</button>
+        <p>Status: <span id="botStatus">Inactive</span></p>
+        <p>Generating: <span id="imageStatus">No</span></p>
+        <p>Current Task: <span id="currentTask">Idle</span></p>
+      </div>
+
+      <div class="panel">
+        <h2>Live Operations</h2>
+        <div id="liveStatus"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Image History</h2>
+        <div id="imageLog"></div>
+      </div>
+
+      <div class="panel">
+        <h2>User Statistics</h2>
+        <div id="userStats"></div>
+      </div>
+
+      <div class="panel">
+        <h2>User Traffic</h2>
+        <canvas id="trafficChart"></canvas>
+      </div>
+
+      <div class="panel" style="grid-column: span 2;">
+        <h2>Usage Analytics</h2>
+        <canvas id="usageChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let usageChart, trafficChart;
+    let trafficData = [];
+
+    socket.on("adminLoginResponse", ({ success }) => {
+      if (success) {
+        document.getElementById("login").style.display = "none";
+        document.getElementById("container").style.display = "flex";
+        loadInitialData();
+      } else {
+        alert("Invalid password!");
+      }
+    });
+
+    function login() {
+      const password = document.getElementById("adminPassword").value;
+      socket.emit("adminLogin", password);
+    }
+
+    function startBot() {
+      socket.emit("startBot");
+      document.getElementById("startBtn").disabled = true;
+      document.getElementById("stopBtn").disabled = false;
+    }
+
+    function stopBot() {
+      socket.emit("stopBot");
+      document.getElementById("startBtn").disabled = false;
+      document.getElementById("stopBtn").disabled = true;
+    }
+
+    socket.on("log", (data) => {
+      const logDiv = document.getElementById("logs");
+      logDiv.innerHTML += `<p class="${data.type.toLowerCase()}">${data.timestamp} [${data.type}]: ${data.message}</p>`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+    });
+
+    socket.on("imageStatus", ({ isGeneratingImage, model, prompt, user }) => {
+      document.getElementById("imageStatus").textContent = isGeneratingImage ? "Yes" : "No";
+      document.getElementById("currentTask").textContent = isGeneratingImage 
+        ? `Generating image using ${model} model for "${prompt}" by ${user}`
+        : "Idle";
+      const liveStatusDiv = document.getElementById("liveStatus");
+      liveStatusDiv.innerHTML += `<p>${new Date().toISOString()} - ${isGeneratingImage ? "Started" : "Completed"}: ${model || "N/A"} - ${prompt || "N/A"} (${user || "N/A"})</p>`;
+      liveStatusDiv.scrollTop = liveStatusDiv.scrollHeight;
+    });
+
+    socket.on("imageLog", (data) => {
+      const modelNames = {
+        'raider': 'Raider (Fastest)',
+        'flux': 'Flux',
+        'turbo': 'Turbo',
+        'imagen3': 'Imagen3'
+      };
+      const displayModelName = modelNames[data.model] || data.model;
+      
+      const imageLogDiv = document.getElementById("imageLog");
+      imageLogDiv.innerHTML += `<p>${data.timestamp} - ${data.user.displayName}: "${data.prompt}" (${displayModelName}) <a href="${data.url}" target="_blank">View</a></p>`;
+      imageLogDiv.scrollTop = imageLogDiv.scrollHeight;
+    });
+
+    socket.on("imageLogHistory", (logs) => {
+      const imageLogDiv = document.getElementById("imageLog");
+      imageLogDiv.innerHTML = logs.map(log => 
+        `<p>${log.timestamp} - ${log.user.displayName}: "${log.prompt}" (${log.generator}${log.model ? ` - ${log.model}` : ""}) <a href="${log.url}" target="_blank">View</a></p>`
+      ).join("");
+    });
+
+    socket.on("usageData", (usage) => {
+      const labels = usage.map(u => u.date);
+      const imageData = usage.map(u => u.imageCount);
+      if (usageChart) usageChart.destroy();
+      usageChart = new Chart(document.getElementById("usageChart").getContext("2d"), {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            { label: "Total Images", data: imageData, borderColor: "#00cc00", fill: false },
+          ],
+        },
+        options: { responsive: true, maintainAspectRatio: false },
+      });
+    });
+
+    socket.on("userTraffic", ({ activeUsers }) => {
+      trafficData.push({ time: new Date().toLocaleTimeString(), users: activeUsers });
+      if (trafficData.length > 20) trafficData.shift();
+      if (trafficChart) trafficChart.destroy();
+      trafficChart = new Chart(document.getElementById("trafficChart").getContext("2d"), {
+        type: "line",
+        data: {
+          labels: trafficData.map(d => d.time),
+          datasets: [{ label: "Active Users", data: trafficData.map(d => d.users), borderColor: "#007bff", fill: false }],
+        },
+        options: { responsive: true, maintainAspectRatio: false },
+      });
+    });
+
+    socket.on("userStats", (stats) => {
+      const modelNames = {
+        'raider': 'Raider (Fastest)',
+        'flux': 'Flux',
+        'turbo': 'Turbo',
+        'imagen3': 'Imagen3'
+      };
+      
+      const userStatsDiv = document.getElementById("userStats");
+      userStatsDiv.innerHTML = stats.map(stat => 
+        `<p>${stat.userId} - Images: ${stat.imageCount} - Default Model: ${modelNames[stat.defaultModel] || stat.defaultModel}</p>`
+      ).join("");
+    });
+
+    function loadInitialData() {
+      socket.emit("getImageLog");
+      socket.emit("getUsage");
+      socket.emit("getUserTraffic");
+      socket.emit("getUserStats");
+      document.getElementById("botStatus").textContent = "Inactive";
+    }
+
+    document.getElementById("login").style.display = "block";
+  </script>
+</body>
+</html>
