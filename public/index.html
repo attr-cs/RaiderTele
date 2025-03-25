@@ -127,6 +127,7 @@
     const socket = io();
     let usageChart, trafficChart;
     let trafficData = [];
+    const defaultModel = 'flux';
 
     socket.on("adminLoginResponse", ({ success }) => {
       if (success) {
@@ -243,6 +244,13 @@
     }
 
     document.getElementById("login").style.display = "block";
+
+    // In any model descriptions in the HTML/JavaScript
+    modelDescriptions = {
+      'raider': 'Balanced quality and speed',
+      'flux': 'High Quality, Fast',
+      'turbo': 'Enhanced detail and creativity'
+    };
   </script>
 </body>
 </html>

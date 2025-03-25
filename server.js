@@ -49,7 +49,7 @@ const UsageSchema = new mongoose.Schema({
 });
 const UserConfigSchema = new mongoose.Schema({
   userId: String,
-  defaultModel: { type: String, default: MODELS.RAIDER },
+  defaultModel: { type: String, default: MODELS.FLUX },
   imageCount: { type: Number, default: 0 },
 });
 const ImageLog = mongoose.model("ImageLog", ImageLogSchema);
@@ -149,32 +149,131 @@ async function generateRandomPrompt() {
     "artist workshop", "design studio", "engineering lab", "science facility",
     "weather station", "mission control", "command center", "observation post",
     "testing chamber", "clean room", "data center", "server farm",
-    "greenhouse complex", "hydroponics bay", "gene lab", "quantum computer facility"
+    "greenhouse complex", "hydroponics bay", "gene lab", "quantum computer facility",
+
+    // Sci-Fi Advanced
+    "quantum computing facility", "nanite assembly plant", "AI consciousness hub", 
+    "biomechanical garden", "synthetic evolution lab", "time dilation chamber",
+    "antimatter reactor", "neural interface clinic", "memory extraction lab",
+    "consciousness upload center", "synthetic biology lab", "quantum entanglement node",
+    
+    // Urban Evolution
+    "vertical megacity", "smart city hub", "autonomous vehicle depot",
+    "urban farming tower", "waste recycling complex", "energy harvesting district",
+    "digital advertising canyon", "urban air mobility port", "underground eco-habitat",
+    "climate-controlled biodome", "urban water purification plant",
+    
+    // Historical Depth
+    "sumerian marketplace", "phoenician harbor", "babylonian gardens",
+    "mayan observatory", "incan terrace farm", "mongol war camp",
+    "byzantine workshop", "ottoman palace", "mughal court", "polynesian settlement",
+    
+    // Future Architecture
+    "self-healing building", "living architecture hub", "morphing structure",
+    "weather-responsive facade", "bio-luminescent building", "gravity-defying construction",
+    "shape-shifting apartment", "environmental adaptation center",
+    
+    // Advanced Transportation
+    "quantum teleportation hub", "consciousness transfer station", "time travel depot",
+    "dimensional gateway", "neural network transit", "thought travel terminal",
+    "bioorganic vehicle hub", "antimatter drive dock", "zero-point energy port",
+    
+    // Specialized Facilities
+    "memory crystal archive", "dream recording studio", "emotion harvesting plant",
+    "consciousness backup facility", "synthetic reality lab", "quantum probability center",
+    "parallel universe observatory", "temporal paradox research lab",
+    
+    // Natural Evolution
+    "bioluminescent ecosystem", "floating crystal forest", "living metal canyon",
+    "quantum crystal cave", "temporal coral reef", "gravity-warped landscape",
+    "plasma storm field", "dimensional fracture zone", "reality distortion valley",
+    
+    // Cultural Fusion
+    "cyber-shamanic temple", "techno-organic bazaar", "bio-digital festival",
+    "quantum cultural center", "neural art gallery", "memory culture museum",
+    "synthetic tradition hub", "hybrid ritual space", "digital ceremony chamber",
+    
+    
   ];
 
   const styles = [
     "photorealistic", "oil painting", "watercolor", "digital art", "pencil sketch",
     "charcoal drawing", "3D render", "concept art", "vintage photograph", "anime style",
     "comic book art", "propaganda poster", "technical diagram", "architectural rendering",
-    "isometric design", "pixel art", "synthwave", "vaporwave", "minimalist", "baroque"
+    "isometric design", "pixel art", "synthwave", "vaporwave", "minimalist", "baroque",
+    "holographic projection", "quantum visualization", "neural network art",
+    "bio-organic rendering", "temporal distortion", "dimensional shift",
+    "reality glitch", "consciousness stream", "memory crystal",
+    "synthetic dreams", "quantum impressionism", "neural abstract",
+    "bio-digital fusion", "temporal watercolor", "quantum oil painting",
+    
   ];
 
   const moods = [
     "dystopian", "optimistic", "mysterious", "peaceful", "chaotic",
     "industrial", "serene", "tense", "nostalgic", "futuristic",
     "abandoned", "bustling", "isolated", "harmonious", "clinical",
-    "decaying", "pristine", "weathered", "sterile", "organic"
+    "decaying", "pristine", "weathered", "sterile", "organic",
+    "quantum uncertain", "temporally displaced", "dimensionally shifted",
+    "consciously evolving", "synthetically alive", "neurally connected",
+    "bio-digitally fused", "reality warped", "probability shifted",
+    "quantum entangled", "temporally paradoxical", "dimensionally aware",
+    
   ];
 
   const timeOfDay = [
     "dawn", "morning", "noon", "afternoon", "dusk",
-    "twilight", "night", "midnight", "golden hour", "blue hour"
+    "twilight", "night", "midnight", "golden hour", "blue hour",
+    "quantum midnight", "temporal noon", "dimensional dawn",
+    "synthetic sunset", "neural twilight", "bio-digital morning",
+    "probability dusk", "parallel dawn", "quantum gloaming",
+    "temporal witching hour", "dimensional zenith", "synthetic nadir",
+    
   ];
 
   const perspectives = [
     "bird's eye view", "worm's eye view", "isometric", "first person",
     "wide angle", "telephoto", "macro", "panoramic", "dutch angle",
-    "overhead shot", "low angle", "eye level", "three-quarter view"
+    "overhead shot", "low angle", "eye level", "three-quarter view",
+    "quantum perspective", "temporal view", "dimensional angle",
+    "synthetic vision", "neural sight", "bio-digital lens",
+    "probability frame", "parallel view", "quantum focus",
+    "temporal parallax", "dimensional shift", "synthetic depth",
+    
+  ];
+
+  const lighting = [
+    "volumetric rays", "quantum luminescence", "temporal glow",
+    "dimensional radiance", "synthetic illumination", "neural light",
+    "bio-digital emission", "probability shine", "parallel beam",
+    
+  ];
+
+  const atmospheres = [
+    "quantum fog", "temporal mist", "dimensional haze",
+    "synthetic atmosphere", "neural cloud", "bio-digital vapor",
+    "probability dust", "parallel air", "quantum smoke",
+    
+  ];
+
+  const textures = [
+    "quantum surface", "temporal fabric", "dimensional material",
+    "synthetic texture", "neural pattern", "bio-digital surface",
+    "probability weave", "parallel structure", "quantum grain",
+    
+  ];
+
+  const colors = [
+    "quantum spectrum", "temporal palette", "dimensional hue",
+    "synthetic shade", "neural tint", "bio-digital tone",
+    "probability color", "parallel pigment", "quantum chroma",
+      
+  ];
+
+  const compositions = [
+    "quantum balance", "temporal harmony", "dimensional flow",
+    "synthetic arrangement", "neural composition", "bio-digital layout",
+    "probability design", "parallel structure", "quantum order",
   ];
 
   const randomTheme = themes[Math.floor(Math.random() * themes.length)];
@@ -182,6 +281,11 @@ async function generateRandomPrompt() {
   const randomMood = moods[Math.floor(Math.random() * moods.length)];
   const randomTime = timeOfDay[Math.floor(Math.random() * timeOfDay.length)];
   const randomPerspective = perspectives[Math.floor(Math.random() * perspectives.length)];
+  const randomLighting = lighting[Math.floor(Math.random() * lighting.length)];
+  const randomAtmosphere = atmospheres[Math.floor(Math.random() * atmospheres.length)];
+  const randomTexture = textures[Math.floor(Math.random() * textures.length)];
+  const randomColor = colors[Math.floor(Math.random() * colors.length)];
+  const randomComposition = compositions[Math.floor(Math.random() * compositions.length)];
 
   const systemPrompt = `Create a single detailed image generation prompt combining these elements:
 Theme: "${randomTheme}"
@@ -189,6 +293,11 @@ Style: "${randomStyle}"
 Mood: "${randomMood}"
 Time: "${randomTime}"
 Perspective: "${randomPerspective}"
+Lighting: "${randomLighting}"
+Atmosphere: "${randomAtmosphere}"
+Texture: "${randomTexture}"
+Color: "${randomColor}"
+Composition: "${randomComposition}"
 
 Rules:
 - Return ONLY the prompt text with no explanations or formatting
@@ -199,42 +308,46 @@ Rules:
 - NO generic fantasy elements or clichés
 - NO explanatory text or meta-commentary
 - Avoid overused AI art tropes and descriptions
+- Naturally blend all elements into a cohesive description
+- Create unexpected and interesting combinations
 
 The prompt should read as one cohesive description that naturally incorporates all elements.`;
-
+  
   try {
-    // First try with Pollinations text API
+    // First try with Gemini API 1
     try {
-      const response = await axios.post('https://text.pollinations.ai/', {
-        messages: [
-          {
-            role: "system",
-            content: systemPrompt
-          },
-          {
-            role: "user",
-            content: `Generate a unique image prompt for theme: ${randomTheme}. Make it completely different from standard AI art.`
-          }
-        ],
-        model: "mistral",
-        private: true,
-        seed: randomSeed // Add random seed to API call
-      });
-      
-      return response.data.trim();
-    } catch (error) {
-      console.error("Pollinations API failed:", error);
-      
-      // Fallback to Gemini APIs
-      try {
-        const model = genAI1.getGenerativeModel({ model: "gemini-2.0-flash" });
-        const result = await model.generateContent(systemPrompt + `\nMake it unique and different from: ${randomTheme}`);
-        return result.response.text().trim();
+      const model = genAI1.getGenerativeModel({ model: "gemini-2.0-flash" });
+      const result = await model.generateContent(systemPrompt);
+      return result.response.text().trim();
     } catch (error) {
       console.error("First Gemini API key failed:", error);
-      const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
-        const result = await model.generateContent(systemPrompt + `\nCreate something completely different from previous prompts.`);
-      return result.response.text().trim();
+      
+      // Second try with Gemini API 2
+      try {
+        const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const result = await model.generateContent(systemPrompt);
+        return result.response.text().trim();
+      } catch (error) {
+        console.error("Second Gemini API key failed:", error);
+        
+        // Fallback to Pollinations text API
+        const response = await axios.post('https://text.pollinations.ai/', {
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt
+            },
+            {
+              role: "user",
+              content: "Generate a unique image prompt"
+            }
+          ],
+          model: "mistral",
+          private: true,
+          seed: randomSeed
+        });
+        
+        return response.data.trim();
       }
     }
   } catch (error) {
@@ -357,8 +470,8 @@ Greetings! I am your advanced image generation assistant. Here's how to utilize 
 - /status - View the current operational status
 
 Available models:
-• Raider - High Quality, Fast (Default)
-• Flux - Balanced quality and speed
+• Raider - Balanced quality and speed
+• Flux - High Quality, Fast (Default)
 • Turbo - Enhanced detail and creativity
 
 Example usage: "/img A majestic castle in the clouds"
@@ -401,7 +514,7 @@ app.post("/webhook", async (req, res) => {
     } 
     else if (validateCommand(text, "/status")) {
       const queueSize = imageGenerationQueue.length;
-      const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.RAIDER };
+      const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.FLUX };
       const status = `🤖 Bot Status: ${botRunning ? "Active ✅" : "Inactive ❌"}
 📊 Queue Size: ${queueSize} ${queueSize > 0 ? "🔄" : "✅"}
 🎨 Your Default Model: ${modelNames[userConfig.defaultModel]} 
@@ -424,7 +537,7 @@ app.post("/webhook", async (req, res) => {
     else if (validateCommand(text, "/rnds")) {
       try {
         const randomPrompt = await generateRandomPrompt();
-        const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.RAIDER };
+        const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.FLUX };
         let model = userConfig.defaultModel;
         
         imageGenerationQueue.push({ 
@@ -460,8 +573,8 @@ app.post("/webhook", async (req, res) => {
       
       await bot.sendMessage(chatId, 
         "🎨 Select your default model:\n\n" +
-        "1. Raider - High Quality, Fast (Default)\n" +
-        "2. Flux - Balanced quality and speed\n" +
+        "1. Raider - Balanced quality and speed\n" +
+        "2. Flux - High Quality, Fast (Default)\n" +
         "3. Turbo - Enhanced detail and creativity\n\n" +
         "Reply with a number (1-3)",
         keyboard
@@ -478,7 +591,7 @@ app.post("/webhook", async (req, res) => {
         return res.sendStatus(200);
       }
 
-      const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.RAIDER };
+      const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.FLUX };
       const model = userConfig.defaultModel;
 
       imageGenerationQueue.push({ chatId, prompt, model, userInfo });

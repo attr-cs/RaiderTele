@@ -76,3 +76,8 @@ The admin dashboard is available at the root URL. Login required with admin pass
 - Queue system for concurrent image generation
 - Proper error messages for failed operations
 - MongoDB connection retry mechanism
+
+## Available Models
+- Raider - Balanced quality and speed
+- Flux - High Quality, Fast (Default)
+- Turbo - Enhanced detail and creativity
