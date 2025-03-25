@@ -482,6 +482,24 @@ const validateCommand = (text, command) => {
     (text.startsWith("/") && text.startsWith(command.slice(1), 1));
 };
 
+app.get("/test", (req, res) => {
+  try {
+    res.json({
+      status: "success",
+      message: "API is working",
+      timestamp: new Date().toISOString(),
+      botStatus: botRunning ? "active" : "inactive",
+      queueSize: imageGenerationQueue.length
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Internal server error",
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 app.post("/webhook", async (req, res) => {
   const { message } = req.body;
   if (!message || !message.chat || !message.from || !botRunning) {
