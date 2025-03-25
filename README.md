@@ -8,7 +8,6 @@ A powerful Telegram bot that generates images using multiple AI models. Built wi
   - Raider (Fastest) - Optimized for speed using WebSim AI
   - Flux - Balanced quality and speed via Pollinations AI
   - Turbo - Enhanced detail and creativity via Pollinations AI
-  - Imagen3 - Google's advanced AI model via Gemini API
 
 - Smart Prompt Generation:
   - AI-powered random prompt generation using Google's Gemini API
@@ -25,7 +24,7 @@ A powerful Telegram bot that generates images using multiple AI models. Built wi
 
 - `/start` - Initialize the bot and see available commands
 - `/img <prompt>` - Generate an image using your default model
-- `/model` - Change your default model (Raider/Flux/Turbo/Imagen3)
+- `/model` - Change your default model (Raider/Flux/Turbo)
 - `/rdm` - Receive an AI-generated creative prompt
 - `/rnds` - Generate an image from a random AI-generated prompt
 - `/status` - View current operational status
@@ -35,7 +34,6 @@ A powerful Telegram bot that generates images using multiple AI models. Built wi
 - Image Generation APIs:
   - WebSim AI (Raider model)
   - Pollinations AI (Flux & Turbo models)
-  - Google Gemini (Imagen3 model & prompt generation)
 
 - Default Settings:
   - Default Model: Raider (Fastest)

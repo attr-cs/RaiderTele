@@ -16,22 +16,20 @@ const PORT = process.env.PORT || 4000;
 const bot = new TelegramBot(process.env.BOT_TOKEN);
 const WEBHOOK_URL = process.env.WEBHOOK_URL + "/webhook";
 const BOT_USERNAME = process.env.BOT_USERNAME || "@YourBotUsername";
-const ADMIN_PASSWORD_HASH = bcrypt.hashSync("xAI_Grok_Rules_2025!", 10);
+const ADMIN_PASSWORD_HASH = bcrypt.hashSync(process.env.ADMIN_PASSWORD, 10);
 const DB_URL = process.env.DB_URL;
 const VALID_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "21:9", "9:21"];
 
 const MODELS = {
   RAIDER: "raider",
   FLUX: "flux",
-  TURBO: "turbo",
-  IMAGEN3: "imagen3"
+  TURBO: "turbo"
 };
 
 const modelNames = {
   [MODELS.RAIDER]: "Raider",
   [MODELS.FLUX]: "Flux",
-  [MODELS.TURBO]: "Turbo",
-  [MODELS.IMAGEN3]: "Imagen3"
+  [MODELS.TURBO]: "Turbo"
 };
 
 const genAI1 = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -51,7 +49,7 @@ const UsageSchema = new mongoose.Schema({
 });
 const UserConfigSchema = new mongoose.Schema({
   userId: String,
-  defaultModel: { type: String, default: MODELS.TURBO },
+  defaultModel: { type: String, default: MODELS.RAIDER },
   imageCount: { type: Number, default: 0 },
 });
 const ImageLog = mongoose.model("ImageLog", ImageLogSchema);
@@ -79,21 +77,73 @@ bot.setWebHook(WEBHOOK_URL)
   .catch((err) => console.error("Webhook Error:", err));
 
 async function generateRandomPrompt() {
-  const systemPrompt = "Generate a creative, detailed and imaginative prompt for AI image generation. Make it vivid and specific, focusing on visual elements. Return only the prompt text without any explanations or additional text.";
+  // Add timestamp and random seed to ensure uniqueness
+  const timestamp = Date.now();
+  const randomSeed = Math.floor(Math.random() * 1000000);
   
+  const themes = [
+    "cyberpunk city", "ancient ruins", "space colony", "underwater civilization",
+    "desert nomads", "floating islands", "mechanical world", "crystal caves",
+    "urban life", "steampunk factory", "quantum realm", "arctic expedition",
+    "volcanic landscape", "neon marketplace", "zen garden", "time travel",
+    "post-apocalyptic", "micro world", "cloud city", "underground kingdom"
+  ];
+
+  // Randomly select a theme
+  const randomTheme = themes[Math.floor(Math.random() * themes.length)];
+  
+  const systemPrompt = `Create a unique image generation prompt based on the theme: "${randomTheme}".
+Rules:
+- Be specific and detailed but concise
+- Include visual style (e.g. oil painting, digital art, photography)
+- Specify lighting and atmosphere
+- Add unique elements that make it stand out
+- NO ethereal, mystical, or bioluminescent descriptions
+- NO dragons, forests, or generic fantasy elements
+- Focus on composition and mood
+- Include technical aspects like camera angle or time of day
+- Make it different from typical AI art prompts
+
+Seed: ${randomSeed}
+Timestamp: ${timestamp}`;
+
   try {
+    // First try with Pollinations text API
     try {
-      const model = genAI1.getGenerativeModel({ model: "gemini-2.0-flash" });
-      const result = await model.generateContent(systemPrompt);
-      return result.response.text().trim();
+      const response = await axios.post('https://text.pollinations.ai/', {
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt
+          },
+          {
+            role: "user",
+            content: `Generate a unique image prompt for theme: ${randomTheme}. Make it completely different from standard AI art.`
+          }
+        ],
+        model: "mistral",
+        private: true,
+        seed: randomSeed // Add random seed to API call
+      });
+      
+      return response.data.trim();
     } catch (error) {
-      console.error("First Gemini API key failed:", error);
-      const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
-      const result = await model.generateContent(systemPrompt);
-      return result.response.text().trim();
+      console.error("Pollinations API failed:", error);
+      
+      // Fallback to Gemini APIs
+      try {
+        const model = genAI1.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const result = await model.generateContent(systemPrompt + `\nMake it unique and different from: ${randomTheme}`);
+        return result.response.text().trim();
+      } catch (error) {
+        console.error("First Gemini API key failed:", error);
+        const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const result = await model.generateContent(systemPrompt + `\nCreate something completely different from previous prompts.`);
+        return result.response.text().trim();
+      }
     }
   } catch (error) {
-    console.error("Both Gemini API keys failed:", error);
+    console.error("All prompt generation methods failed:", error);
     throw new Error("Failed to generate random prompt. Please try again.");
   }
 }
@@ -102,29 +152,7 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
   try {
     const seed = Math.floor(Math.random() * 999999) + 1;
     
-    if (model === MODELS.IMAGEN3) {
-      try {
-        try {
-          const genAI = genAI1;
-          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
-          const result = await model.generateContent(prompt);
-          console.log("Gemini Imagen3 not fully supported yet, falling back to Turbo model");
-          const encodedPrompt = encodeURIComponent(prompt);
-          return `https://image.pollinations.ai/prompt/${encodedPrompt}?model=turbo&seed=${seed}&nologo=true&private=true&safe=false`;
-        } catch (error) {
-          console.error("First Gemini API key failed for image:", error);
-          const genAI = genAI2;
-          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
-          const result = await model.generateContent(prompt);
-          console.log("Gemini Imagen3 not fully supported yet, falling back to Turbo model");
-          const encodedPrompt = encodeURIComponent(prompt);
-          return `https://image.pollinations.ai/prompt/${encodedPrompt}?model=turbo&seed=${seed}&nologo=true&private=true&safe=false`;
-        }
-      } catch (error) {
-        console.error("Both Gemini API keys failed for image:", error);
-        throw new Error("Image generation with Imagen3 failed. Falling back to Turbo model.");
-      }
-    } else if (model === MODELS.RAIDER) {
+    if (model === MODELS.RAIDER) {
       const config = {
         headers: { 
           "accept": "*/*", 
@@ -179,16 +207,7 @@ async function processImageQueue() {
       try {
         imageUrl = await generateImage(prompt, model);
       } catch (error) {
-        if (model === MODELS.IMAGEN3) {
-          displayModelName = modelNames[MODELS.TURBO] + " (Fallback)";
-          await bot.sendMessage(chatId, 
-            "⚠️ Imagen3 generation failed. Falling back to Turbo model...",
-            { parse_mode: 'Markdown' }
-          );
-          imageUrl = await generateImage(prompt, MODELS.TURBO);
-        } else {
           throw error;
-        }
       }
 
       await bot.sendPhoto(chatId, imageUrl, {
@@ -243,10 +262,9 @@ Greetings! I am your advanced image generation assistant. Here's how to utilize 
 - /status - View the current operational status
 
 Available models:
-• Raider - High Quality, Fast
+• Raider - High Quality, Fast (Default)
 • Flux - Balanced quality and speed
-• Turbo - Enhanced detail and creativity (Default)
-• Imagen3 - Google's advanced AI model
+• Turbo - Enhanced detail and creativity
 
 Example usage: "/img A majestic castle in the clouds"
 `;
@@ -288,7 +306,7 @@ app.post("/webhook", async (req, res) => {
     } 
     else if (validateCommand(text, "/status")) {
       const queueSize = imageGenerationQueue.length;
-      const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.TURBO };
+      const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.RAIDER };
       const status = `🤖 Bot Status: ${botRunning ? "Active ✅" : "Inactive ❌"}
 📊 Queue Size: ${queueSize} ${queueSize > 0 ? "🔄" : "✅"}
 🎨 Your Default Model: ${modelNames[userConfig.defaultModel]} 
@@ -311,19 +329,9 @@ app.post("/webhook", async (req, res) => {
     else if (validateCommand(text, "/rnds")) {
       try {
         const randomPrompt = await generateRandomPrompt();
-        const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.TURBO };
+        const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.RAIDER };
         let model = userConfig.defaultModel;
         
-        // If model is Imagen3, use Turbo instead
-        if (model === MODELS.IMAGEN3) {
-          model = MODELS.TURBO;
-          await bot.sendMessage(chatId, 
-            "⚠️ Imagen3 is not supported for random generation. Using Turbo model instead.",
-            { parse_mode: 'Markdown' }
-          );
-        }
-        
-        // Add a flag to indicate this is from /rnds command
         imageGenerationQueue.push({ 
           chatId, 
           prompt: randomPrompt, 
@@ -348,8 +356,7 @@ app.post("/webhook", async (req, res) => {
           keyboard: [
             ["1. Raider"],
             ["2. Flux"],
-            ["3. Turbo"],
-            ["4. Imagen3"]
+            ["3. Turbo"]
           ],
           one_time_keyboard: true,
           resize_keyboard: true
@@ -358,11 +365,10 @@ app.post("/webhook", async (req, res) => {
       
       await bot.sendMessage(chatId, 
         "🎨 Select your default model:\n\n" +
-        "1. Raider - High Quality, Fast\n" +
+        "1. Raider - High Quality, Fast (Default)\n" +
         "2. Flux - Balanced quality and speed\n" +
-        "3. Turbo - Enhanced detail and creativity (Default)\n" +
-        "4. Imagen3 - Google's advanced AI model\n\n" +
-        "Reply with a number (1-4)",
+        "3. Turbo - Enhanced detail and creativity\n\n" +
+        "Reply with a number (1-3)",
         keyboard
       );
     }
@@ -377,7 +383,7 @@ app.post("/webhook", async (req, res) => {
         return res.sendStatus(200);
       }
 
-      const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.TURBO };
+      const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.RAIDER };
       const model = userConfig.defaultModel;
 
       imageGenerationQueue.push({ chatId, prompt, model, userInfo });
@@ -391,7 +397,7 @@ app.post("/webhook", async (req, res) => {
     }
     else if (message.reply_to_message?.text?.includes("Select your default model")) {
       const choice = parseInt(text) - 1;
-      const models = [MODELS.RAIDER, MODELS.FLUX, MODELS.TURBO, MODELS.IMAGEN3];
+      const models = [MODELS.RAIDER, MODELS.FLUX, MODELS.TURBO];
       
       if (choice >= 0 && choice < models.length) {
         const selectedModel = models[choice];
@@ -404,8 +410,7 @@ app.post("/webhook", async (req, res) => {
         const modelDescriptions = {
           [MODELS.RAIDER]: "High Quality, Fast",
           [MODELS.FLUX]: "Balanced quality and speed",
-          [MODELS.TURBO]: "Enhanced detail and creativity",
-          [MODELS.IMAGEN3]: "Google's advanced AI model"
+          [MODELS.TURBO]: "Enhanced detail and creativity"
         };
         
         await bot.sendMessage(chatId, 
@@ -414,7 +419,7 @@ app.post("/webhook", async (req, res) => {
           `Use /img with a prompt to generate images!`
         );
       } else {
-        await bot.sendMessage(chatId, "❌ Invalid selection. Please choose a number between 1 and 4.");
+        await bot.sendMessage(chatId, "❌ Invalid selection. Please choose a number between 1 and 3.");
       }
     }
   } catch (error) {
