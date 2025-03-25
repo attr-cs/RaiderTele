@@ -77,35 +77,130 @@ bot.setWebHook(WEBHOOK_URL)
   .catch((err) => console.error("Webhook Error:", err));
 
 async function generateRandomPrompt() {
-  // Add timestamp and random seed to ensure uniqueness
   const timestamp = Date.now();
   const randomSeed = Math.floor(Math.random() * 1000000);
   
   const themes = [
-    "cyberpunk city", "ancient ruins", "space colony", "underwater civilization",
-    "desert nomads", "floating islands", "mechanical world", "crystal caves",
-    "urban life", "steampunk factory", "quantum realm", "arctic expedition",
-    "volcanic landscape", "neon marketplace", "zen garden", "time travel",
-    "post-apocalyptic", "micro world", "cloud city", "underground kingdom"
+    // Sci-Fi Themes
+    "cyberpunk metropolis", "space station", "mars colony", "quantum laboratory", 
+    "android factory", "neon slums", "hologram market", "orbital habitat",
+    "cyborg workshop", "laser highway", "plasma foundry", "zero gravity garden",
+    "robot repair shop", "data center", "virtual reality hub", "clone facility",
+    "alien embassy", "tech noir alley", "solar sail port", "asteroid mining base",
+
+    // Urban/Modern Themes
+    "subway platform", "rooftop garden", "street food market", "urban farm",
+    "construction site", "shopping arcade", "parking garage", "office lobby",
+    "metro station", "city intersection", "food court", "urban decay",
+    "apartment complex", "highway overpass", "billboard jungle", "power plant",
+    "container port", "train yard", "bus terminal", "industrial zone",
+
+    // Historical Themes
+    "victorian factory", "medieval workshop", "ancient marketplace", "roman bath",
+    "renaissance studio", "viking shipyard", "aztec temple", "persian palace",
+    "egyptian tomb", "celtic forge", "japanese castle", "silk road bazaar",
+    "colonial port", "wild west saloon", "monastery library", "pirate cove",
+    "feudal farm", "nomad camp", "tribal village", "ancient observatory",
+
+    // Industrial/Mechanical
+    "clockwork factory", "steam engine room", "gear workshop", "furnace chamber",
+    "assembly line", "mechanical laboratory", "turbine hall", "control room",
+    "boiler room", "machine shop", "foundry floor", "conveyor system",
+    "hydraulic plant", "testing facility", "maintenance bay", "welding station",
+    "robotic assembly", "quality control", "parts warehouse", "repair dock",
+
+    // Abstract/Surreal
+    "impossible geometry", "dream corridor", "memory palace", "thought bubble",
+    "consciousness stream", "parallel dimension", "time spiral", "reality fold",
+    "mind maze", "quantum realm", "abstract plane", "void space",
+    "neural network", "dimensional rift", "paradox chamber", "infinity loop",
+    "reality glitch", "memory fragment", "dream sequence", "consciousness cloud",
+
+    // Architecture
+    "brutalist complex", "glass skyscraper", "floating pavilion", "underground bunker",
+    "eco-building", "vertical farm", "solar tower", "wind turbine field",
+    "geodesic dome", "bamboo structure", "desert architecture", "ice hotel",
+    "treehouse city", "cave dwelling", "floating market", "suspended bridge",
+    "mountain monastery", "underwater hotel", "desert oasis", "cloud platform",
+
+    // Natural/Landscape
+    "volcanic crater", "ice canyon", "salt flat", "coral reef",
+    "desert dunes", "mountain peak", "tidal pool", "geothermal spring",
+    "crystal cave", "rock formation", "glacial lake", "sandstone arch",
+    "limestone karst", "basalt column", "meteor crater", "fossil bed",
+    "granite cliff", "mud volcano", "geyser field", "stone forest",
+
+    // Cultural/Social
+    "tea ceremony", "street festival", "night market", "public square",
+    "outdoor cinema", "street performance", "food stall", "craft workshop",
+    "farmers market", "street parade", "art installation", "public garden",
+    "street carnival", "outdoor concert", "sports event", "protest march",
+    "religious ceremony", "cultural celebration", "street fair", "public gathering",
+
+    // Transportation
+    "hyperloop station", "flying car port", "magnetic railway", "drone hub",
+    "airship dock", "submarine pen", "rocket launch pad", "hover vehicle depot",
+    "teleport chamber", "gravity train", "space elevator", "wormhole gate",
+    "quantum transport", "time machine lab", "interdimensional port", "telekinetic transit",
+    "matter transmitter", "vacuum tube system", "levitation platform", "portal nexus",
+
+    // Professional/Work
+    "research laboratory", "surgical theater", "broadcast studio", "recording booth",
+    "artist workshop", "design studio", "engineering lab", "science facility",
+    "weather station", "mission control", "command center", "observation post",
+    "testing chamber", "clean room", "data center", "server farm",
+    "greenhouse complex", "hydroponics bay", "gene lab", "quantum computer facility"
   ];
 
-  // Randomly select a theme
-  const randomTheme = themes[Math.floor(Math.random() * themes.length)];
-  
-  const systemPrompt = `Create a unique image generation prompt based on the theme: "${randomTheme}".
-Rules:
-- Be specific and detailed but concise
-- Include visual style (e.g. oil painting, digital art, photography)
-- Specify lighting and atmosphere
-- Add unique elements that make it stand out
-- NO ethereal, mystical, or bioluminescent descriptions
-- NO dragons, forests, or generic fantasy elements
-- Focus on composition and mood
-- Include technical aspects like camera angle or time of day
-- Make it different from typical AI art prompts
+  const styles = [
+    "photorealistic", "oil painting", "watercolor", "digital art", "pencil sketch",
+    "charcoal drawing", "3D render", "concept art", "vintage photograph", "anime style",
+    "comic book art", "propaganda poster", "technical diagram", "architectural rendering",
+    "isometric design", "pixel art", "synthwave", "vaporwave", "minimalist", "baroque"
+  ];
 
-Seed: ${randomSeed}
-Timestamp: ${timestamp}`;
+  const moods = [
+    "dystopian", "optimistic", "mysterious", "peaceful", "chaotic",
+    "industrial", "serene", "tense", "nostalgic", "futuristic",
+    "abandoned", "bustling", "isolated", "harmonious", "clinical",
+    "decaying", "pristine", "weathered", "sterile", "organic"
+  ];
+
+  const timeOfDay = [
+    "dawn", "morning", "noon", "afternoon", "dusk",
+    "twilight", "night", "midnight", "golden hour", "blue hour"
+  ];
+
+  const perspectives = [
+    "bird's eye view", "worm's eye view", "isometric", "first person",
+    "wide angle", "telephoto", "macro", "panoramic", "dutch angle",
+    "overhead shot", "low angle", "eye level", "three-quarter view"
+  ];
+
+  const randomTheme = themes[Math.floor(Math.random() * themes.length)];
+  const randomStyle = styles[Math.floor(Math.random() * styles.length)];
+  const randomMood = moods[Math.floor(Math.random() * moods.length)];
+  const randomTime = timeOfDay[Math.floor(Math.random() * timeOfDay.length)];
+  const randomPerspective = perspectives[Math.floor(Math.random() * perspectives.length)];
+
+  const systemPrompt = `Create a single detailed image generation prompt combining these elements:
+Theme: "${randomTheme}"
+Style: "${randomStyle}"
+Mood: "${randomMood}"
+Time: "${randomTime}"
+Perspective: "${randomPerspective}"
+
+Rules:
+- Return ONLY the prompt text with no explanations or formatting
+- Be specific and detailed but concise (max 3-4 sentences)
+- Focus on visual elements, composition, and atmosphere
+- Include specific lighting, colors, and textures
+- Add unique details that make the scene memorable
+- NO generic fantasy elements or clichés
+- NO explanatory text or meta-commentary
+- Avoid overused AI art tropes and descriptions
+
+The prompt should read as one cohesive description that naturally incorporates all elements.`;
 
   try {
     // First try with Pollinations text API
@@ -135,11 +230,11 @@ Timestamp: ${timestamp}`;
         const model = genAI1.getGenerativeModel({ model: "gemini-2.0-flash" });
         const result = await model.generateContent(systemPrompt + `\nMake it unique and different from: ${randomTheme}`);
         return result.response.text().trim();
-      } catch (error) {
-        console.error("First Gemini API key failed:", error);
-        const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
+    } catch (error) {
+      console.error("First Gemini API key failed:", error);
+      const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
         const result = await model.generateContent(systemPrompt + `\nCreate something completely different from previous prompts.`);
-        return result.response.text().trim();
+      return result.response.text().trim();
       }
     }
   } catch (error) {
