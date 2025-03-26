@@ -81,3 +81,4 @@ The admin dashboard is available at the root URL. Login required with admin pass
 - Raider - Balanced quality and speed
 - Flux - High Quality, Fast (Default)
 - Turbo - Enhanced detail and creativity
+- Gemini Flash 2.0 - Google's advanced AI model

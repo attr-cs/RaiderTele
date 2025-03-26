@@ -7,6 +7,8 @@ const http = require("http");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const path = require("path");
+const fs = require("fs");
 
 const app = express();
 const server = http.createServer(app);
@@ -23,13 +25,15 @@ const VALID_ASPECT_RATIOS = ["1:1", "16:9", "9:16", "21:9", "9:21"];
 const MODELS = {
   RAIDER: "raider",
   FLUX: "flux",
-  TURBO: "turbo"
+  TURBO: "turbo",
+  GEMINI: "gemini"
 };
 
 const modelNames = {
   [MODELS.RAIDER]: "Raider",
   [MODELS.FLUX]: "Flux",
-  [MODELS.TURBO]: "Turbo"
+  [MODELS.TURBO]: "Turbo",
+  [MODELS.GEMINI]: "Gemini Flash 2.0"
 };
 
 const genAI1 = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -62,6 +66,25 @@ let botRunning = false;
 const activeChats = new Set();
 const activeUsers = new Set();
 
+const tempDir = path.join('public', 'temp');
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
+}
+
+function cleanupTempFiles() {
+  const files = fs.readdirSync(tempDir);
+  const now = Date.now();
+  files.forEach(file => {
+    const filePath = path.join(tempDir, file);
+    const stats = fs.statSync(filePath);
+    if (now - stats.mtimeMs > 3600000) {
+      fs.unlinkSync(filePath);
+    }
+  });
+}
+
+setInterval(cleanupTempFiles, 3600000);
+
 mongoose.connect(DB_URL, { 
   maxPoolSize: 10,
   serverSelectionTimeoutMS: 5000
@@ -81,165 +104,65 @@ async function generateRandomPrompt() {
   const randomSeed = Math.floor(Math.random() * 1000000);
   
   const themes = [
-    // Sci-Fi Themes
-    "cyberpunk metropolis", "space station", "mars colony", "quantum laboratory", 
-    "android factory", "neon slums", "hologram market", "orbital habitat",
-    "cyborg workshop", "laser highway", "plasma foundry", "zero gravity garden",
-    "robot repair shop", "data center", "virtual reality hub", "clone facility",
-    "alien embassy", "tech noir alley", "solar sail port", "asteroid mining base",
+    // High-Quality Scenes
+    "cinematic cityscape", "golden hour landscape", "dramatic mountain vista", 
+    "serene beach sunset", "misty forest morning", "urban street photography",
+    "architectural masterpiece", "cozy cafe interior", "luxury penthouse view",
+    "historic castle grounds", "modern art gallery", "japanese zen garden",
 
-    // Urban/Modern Themes
-    "subway platform", "rooftop garden", "street food market", "urban farm",
-    "construction site", "shopping arcade", "parking garage", "office lobby",
-    "metro station", "city intersection", "food court", "urban decay",
-    "apartment complex", "highway overpass", "billboard jungle", "power plant",
-    "container port", "train yard", "bus terminal", "industrial zone",
-
-    // Historical Themes
-    "victorian factory", "medieval workshop", "ancient marketplace", "roman bath",
-    "renaissance studio", "viking shipyard", "aztec temple", "persian palace",
-    "egyptian tomb", "celtic forge", "japanese castle", "silk road bazaar",
-    "colonial port", "wild west saloon", "monastery library", "pirate cove",
-    "feudal farm", "nomad camp", "tribal village", "ancient observatory",
-
-    // Industrial/Mechanical
-    "clockwork factory", "steam engine room", "gear workshop", "furnace chamber",
-    "assembly line", "mechanical laboratory", "turbine hall", "control room",
-    "boiler room", "machine shop", "foundry floor", "conveyor system",
-    "hydraulic plant", "testing facility", "maintenance bay", "welding station",
-    "robotic assembly", "quality control", "parts warehouse", "repair dock",
-
-    // Abstract/Surreal
-    "impossible geometry", "dream corridor", "memory palace", "thought bubble",
-    "consciousness stream", "parallel dimension", "time spiral", "reality fold",
-    "mind maze", "quantum realm", "abstract plane", "void space",
-    "neural network", "dimensional rift", "paradox chamber", "infinity loop",
-    "reality glitch", "memory fragment", "dream sequence", "consciousness cloud",
-
-    // Architecture
-    "brutalist complex", "glass skyscraper", "floating pavilion", "underground bunker",
-    "eco-building", "vertical farm", "solar tower", "wind turbine field",
-    "geodesic dome", "bamboo structure", "desert architecture", "ice hotel",
-    "treehouse city", "cave dwelling", "floating market", "suspended bridge",
-    "mountain monastery", "underwater hotel", "desert oasis", "cloud platform",
-
-    // Natural/Landscape
-    "volcanic crater", "ice canyon", "salt flat", "coral reef",
-    "desert dunes", "mountain peak", "tidal pool", "geothermal spring",
-    "crystal cave", "rock formation", "glacial lake", "sandstone arch",
-    "limestone karst", "basalt column", "meteor crater", "fossil bed",
-    "granite cliff", "mud volcano", "geyser field", "stone forest",
-
-    // Cultural/Social
-    "tea ceremony", "street festival", "night market", "public square",
-    "outdoor cinema", "street performance", "food stall", "craft workshop",
-    "farmers market", "street parade", "art installation", "public garden",
-    "street carnival", "outdoor concert", "sports event", "protest march",
-    "religious ceremony", "cultural celebration", "street fair", "public gathering",
-
-    // Transportation
-    "hyperloop station", "flying car port", "magnetic railway", "drone hub",
-    "airship dock", "submarine pen", "rocket launch pad", "hover vehicle depot",
-    "teleport chamber", "gravity train", "space elevator", "wormhole gate",
-    "quantum transport", "time machine lab", "interdimensional port", "telekinetic transit",
-    "matter transmitter", "vacuum tube system", "levitation platform", "portal nexus",
-
-    // Professional/Work
-    "research laboratory", "surgical theater", "broadcast studio", "recording booth",
-    "artist workshop", "design studio", "engineering lab", "science facility",
-    "weather station", "mission control", "command center", "observation post",
-    "testing chamber", "clean room", "data center", "server farm",
-    "greenhouse complex", "hydroponics bay", "gene lab", "quantum computer facility",
-
-    // Sci-Fi Advanced
-    "quantum computing facility", "nanite assembly plant", "AI consciousness hub", 
-    "biomechanical garden", "synthetic evolution lab", "time dilation chamber",
-    "antimatter reactor", "neural interface clinic", "memory extraction lab",
-    "consciousness upload center", "synthetic biology lab", "quantum entanglement node",
+    // Human-Centric (Professional/Artistic)
+    "fashion photography", "street portrait", "dance performance",
+    "artist in studio", "chef in kitchen", "musician on stage",
+    "athlete in motion", "business professional", "traditional craftsman",
     
-    // Urban Evolution
-    "vertical megacity", "smart city hub", "autonomous vehicle depot",
-    "urban farming tower", "waste recycling complex", "energy harvesting district",
-    "digital advertising canyon", "urban air mobility port", "underground eco-habitat",
-    "climate-controlled biodome", "urban water purification plant",
+    // Modern Urban
+    "modern downtown", "rooftop lounge", "subway station",
+    "city park spring", "night market", "boutique shop",
+    "urban garden", "coffee shop", "art district",
     
-    // Historical Depth
-    "sumerian marketplace", "phoenician harbor", "babylonian gardens",
-    "mayan observatory", "incan terrace farm", "mongol war camp",
-    "byzantine workshop", "ottoman palace", "mughal court", "polynesian settlement",
+    // Nature & Landscapes
+    "alpine lake sunrise", "desert oasis", "tropical beach",
+    "autumn forest path", "rolling hills", "crystal cave",
+    "northern lights", "cherry blossom garden", "waterfall vista",
     
-    // Future Architecture
-    "self-healing building", "living architecture hub", "morphing structure",
-    "weather-responsive facade", "bio-luminescent building", "gravity-defying construction",
-    "shape-shifting apartment", "environmental adaptation center",
+    // Architecture & Interiors
+    "modern minimalist", "art deco interior", "gothic cathedral",
+    "japanese temple", "scandinavian home", "mediterranean villa",
+    "industrial loft", "luxury hotel lobby", "bohemian studio",
     
-    // Advanced Transportation
-    "quantum teleportation hub", "consciousness transfer station", "time travel depot",
-    "dimensional gateway", "neural network transit", "thought travel terminal",
-    "bioorganic vehicle hub", "antimatter drive dock", "zero-point energy port",
-    
-    // Specialized Facilities
-    "memory crystal archive", "dream recording studio", "emotion harvesting plant",
-    "consciousness backup facility", "synthetic reality lab", "quantum probability center",
-    "parallel universe observatory", "temporal paradox research lab",
-    
-    // Natural Evolution
-    "bioluminescent ecosystem", "floating crystal forest", "living metal canyon",
-    "quantum crystal cave", "temporal coral reef", "gravity-warped landscape",
-    "plasma storm field", "dimensional fracture zone", "reality distortion valley",
-    
-    // Cultural Fusion
-    "cyber-shamanic temple", "techno-organic bazaar", "bio-digital festival",
-    "quantum cultural center", "neural art gallery", "memory culture museum",
-    "synthetic tradition hub", "hybrid ritual space", "digital ceremony chamber",
-    
-    
+    // Technology & Future
+    "smart city", "tech workspace", "innovation lab",
+    "electric vehicle", "sustainable architecture", "digital art gallery",
+    "modern laboratory", "space observatory", "green technology"
   ];
 
   const styles = [
-    "photorealistic", "oil painting", "watercolor", "digital art", "pencil sketch",
-    "charcoal drawing", "3D render", "concept art", "vintage photograph", "anime style",
-    "comic book art", "propaganda poster", "technical diagram", "architectural rendering",
-    "isometric design", "pixel art", "synthwave", "vaporwave", "minimalist", "baroque",
-    "holographic projection", "quantum visualization", "neural network art",
-    "bio-organic rendering", "temporal distortion", "dimensional shift",
-    "reality glitch", "consciousness stream", "memory crystal",
-    "synthetic dreams", "quantum impressionism", "neural abstract",
-    "bio-digital fusion", "temporal watercolor", "quantum oil painting",
-    
+    "cinematic", "photorealistic", "professional photography",
+    "editorial", "architectural", "fashion photography",
+    "portrait", "landscape", "studio lighting",
+    "golden hour", "blue hour", "natural light",
+    "high-end commercial", "magazine style", "fine art"
   ];
 
   const moods = [
-    "dystopian", "optimistic", "mysterious", "peaceful", "chaotic",
-    "industrial", "serene", "tense", "nostalgic", "futuristic",
-    "abandoned", "bustling", "isolated", "harmonious", "clinical",
-    "decaying", "pristine", "weathered", "sterile", "organic",
-    "quantum uncertain", "temporally displaced", "dimensionally shifted",
-    "consciously evolving", "synthetically alive", "neurally connected",
-    "bio-digitally fused", "reality warped", "probability shifted",
-    "quantum entangled", "temporally paradoxical", "dimensionally aware",
-    
+    "elegant", "professional", "sophisticated",
+    "peaceful", "energetic", "dramatic",
+    "warm", "clean", "modern",
+    "natural", "refined", "authentic"
   ];
 
   const timeOfDay = [
-    "dawn", "morning", "noon", "afternoon", "dusk",
-    "twilight", "night", "midnight", "golden hour", "blue hour",
-    "quantum midnight", "temporal noon", "dimensional dawn",
-    "synthetic sunset", "neural twilight", "bio-digital morning",
-    "probability dusk", "parallel dawn", "quantum gloaming",
-    "temporal witching hour", "dimensional zenith", "synthetic nadir",
-    
+    "golden hour", "blue hour", "soft morning light",
+    "bright midday", "late afternoon", "twilight",
+    "dusk", "night with city lights", "sunrise",
+    "sunset", "overcast diffused light"
   ];
 
   const perspectives = [
-    "bird's eye view", "worm's eye view", "isometric", "first person",
-    "wide angle", "telephoto", "macro", "panoramic", "dutch angle",
-    "overhead shot", "low angle", "eye level", "three-quarter view",
-    "quantum perspective", "temporal view", "dimensional angle",
-    "synthetic vision", "neural sight", "bio-digital lens",
-    "probability frame", "parallel view", "quantum focus",
-    "temporal parallax", "dimensional shift", "synthetic depth",
-    
+    "eye level", "wide angle", "telephoto compression",
+    "aerial view", "low angle", "medium shot",
+    "close-up detail", "establishing shot", "dutch angle",
+    "symmetrical", "leading lines", "rule of thirds"
   ];
 
   const lighting = [
@@ -287,31 +210,26 @@ async function generateRandomPrompt() {
   const randomColor = colors[Math.floor(Math.random() * colors.length)];
   const randomComposition = compositions[Math.floor(Math.random() * compositions.length)];
 
-  const systemPrompt = `Create a single detailed image generation prompt combining these elements:
+  const systemPrompt = `Create a professional, high-quality image generation prompt combining these elements:
 Theme: "${randomTheme}"
 Style: "${randomStyle}"
 Mood: "${randomMood}"
 Time: "${randomTime}"
 Perspective: "${randomPerspective}"
-Lighting: "${randomLighting}"
-Atmosphere: "${randomAtmosphere}"
-Texture: "${randomTexture}"
-Color: "${randomColor}"
-Composition: "${randomComposition}"
 
 Rules:
-- Return ONLY the prompt text with no explanations or formatting
-- Be specific and detailed but concise (max 3-4 sentences)
-- Focus on visual elements, composition, and atmosphere
-- Include specific lighting, colors, and textures
-- Add unique details that make the scene memorable
-- NO generic fantasy elements or clichés
-- NO explanatory text or meta-commentary
-- Avoid overused AI art tropes and descriptions
-- Naturally blend all elements into a cohesive description
-- Create unexpected and interesting combinations
+- Create a clear, specific, and professional description
+- Focus on photographic or cinematic quality
+- Include specific lighting and atmosphere details
+- Add professional photography terms when relevant
+- Emphasize composition and visual impact
+- Keep descriptions grounded and realistic
+- Avoid fantasy or surreal elements unless specifically requested
+- Include technical details that enhance image quality
+- Focus on creating magazine-quality visuals
+- When including people, focus on professional or artistic contexts
 
-The prompt should read as one cohesive description that naturally incorporates all elements.`;
+The prompt should read as a professional photography or cinematography direction.`;
   
   try {
     // First try with Gemini API 1
@@ -324,9 +242,9 @@ The prompt should read as one cohesive description that naturally incorporates a
       
       // Second try with Gemini API 2
       try {
-        const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
-        const result = await model.generateContent(systemPrompt);
-        return result.response.text().trim();
+      const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
+      const result = await model.generateContent(systemPrompt);
+      return result.response.text().trim();
       } catch (error) {
         console.error("Second Gemini API key failed:", error);
         
@@ -360,7 +278,34 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
   try {
     const seed = Math.floor(Math.random() * 999999) + 1;
     
-    if (model === MODELS.RAIDER) {
+    if (model === MODELS.GEMINI) {
+      try {
+        const model = genAI1.getGenerativeModel({
+          model: "gemini-2.0-flash-exp-image-generation",
+          generationConfig: {
+            responseModalities: ['Text', 'Image']
+          },
+        });
+
+        const result = await model.generateContent(`Generate an image for this prompt: ${prompt}`);
+        
+        for (const part of result.response.candidates[0].content.parts) {
+          if (part.inlineData) {
+            const fileName = `gemini-${Date.now()}-${Math.random().toString(36).substring(7)}.png`;
+            const filePath = path.join(tempDir, fileName);
+            
+            const imageBuffer = Buffer.from(part.inlineData.data, 'base64');
+            fs.writeFileSync(filePath, imageBuffer);
+            
+            return `${process.env.WEBHOOK_URL}/temp/${fileName}`;
+          }
+        }
+        throw new Error("No image generated by Gemini");
+      } catch (error) {
+        console.error("Gemini image generation failed:", error);
+        throw error;
+      }
+    } else if (model === MODELS.RAIDER) {
       const config = {
         headers: { 
           "accept": "*/*", 
@@ -473,6 +418,7 @@ Available models:
 • Raider - Balanced quality and speed
 • Flux - High Quality, Fast (Default)
 • Turbo - Enhanced detail and creativity
+• Gemini Flash - Google's advanced AI model
 
 Example usage: "/img A majestic castle in the clouds"
 `;
@@ -582,7 +528,8 @@ app.post("/webhook", async (req, res) => {
           keyboard: [
             ["1. Raider"],
             ["2. Flux"],
-            ["3. Turbo"]
+            ["3. Turbo"],
+            ["4. Gemini Flash"]
           ],
           one_time_keyboard: true,
           resize_keyboard: true
@@ -593,8 +540,9 @@ app.post("/webhook", async (req, res) => {
         "🎨 Select your default model:\n\n" +
         "1. Raider - Balanced quality and speed\n" +
         "2. Flux - High Quality, Fast (Default)\n" +
-        "3. Turbo - Enhanced detail and creativity\n\n" +
-        "Reply with a number (1-3)",
+        "3. Turbo - Enhanced detail and creativity\n" +
+        "4. Gemini Flash - Google's advanced AI model\n\n" +
+        "Reply with a number (1-4)",
         keyboard
       );
     }
@@ -623,7 +571,7 @@ app.post("/webhook", async (req, res) => {
     }
     else if (message.reply_to_message?.text?.includes("Select your default model")) {
       const choice = parseInt(text) - 1;
-      const models = [MODELS.RAIDER, MODELS.FLUX, MODELS.TURBO];
+      const models = [MODELS.RAIDER, MODELS.FLUX, MODELS.TURBO, MODELS.GEMINI];
       
       if (choice >= 0 && choice < models.length) {
         const selectedModel = models[choice];
@@ -634,9 +582,10 @@ app.post("/webhook", async (req, res) => {
         );
         
         const modelDescriptions = {
-          [MODELS.RAIDER]: "High Quality, Fast",
-          [MODELS.FLUX]: "Balanced quality and speed",
-          [MODELS.TURBO]: "Enhanced detail and creativity"
+          [MODELS.RAIDER]: "Balanced quality and speed",
+          [MODELS.FLUX]: "High Quality, Fast",
+          [MODELS.TURBO]: "Enhanced detail and creativity",
+          [MODELS.GEMINI]: "Google's advanced AI model"
         };
         
         await bot.sendMessage(chatId, 
@@ -645,7 +594,7 @@ app.post("/webhook", async (req, res) => {
           `Use /img with a prompt to generate images!`
         );
       } else {
-        await bot.sendMessage(chatId, "❌ Invalid selection. Please choose a number between 1 and 3.");
+        await bot.sendMessage(chatId, "❌ Invalid selection. Please choose a number between 1 and 4.");
       }
     }
   } catch (error) {
