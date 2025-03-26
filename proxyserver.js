@@ -9,6 +9,7 @@ const bcrypt = require("bcrypt");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const path = require("path");
 const fs = require("fs");
+const { HttpsProxyAgent } = require('https-proxy-agent');
 
 const app = express();
 const server = http.createServer(app);
@@ -66,6 +67,23 @@ let botRunning = false;
 const activeChats = new Set();
 const activeUsers = new Set();
 
+// Proxy pool - Fast, reliable free proxies (update periodically with fresh, low-latency proxies)
+const proxyPool = [
+  { ip: '180.183.157.159', port: 8080 }, // US proxy
+  { ip: '46.4.96.137', port: 8080 },   // Germany proxy
+  { ip: '47.91.88.100', port: 8080 }, // India proxy
+  { ip: '45.77.56.114', port: 30205 },  // Nigeria proxy
+  { ip: '38.180.45.148', port: 80 },     // Moldova proxy
+  { ip: '185.243.218.213', port: 3128 }, // Norway proxy
+];
+
+// Function to get a random proxy from the pool
+function getRandomProxy() {
+  const randomIndex = Math.floor(Math.random() * proxyPool.length);
+  const proxy = proxyPool[randomIndex];
+  return `http://${proxy.ip}:${proxy.port}`;
+}
+
 const tempDir = path.join('public', 'temp');
 if (!fs.existsSync(tempDir)) {
   fs.mkdirSync(tempDir, { recursive: true });
@@ -104,172 +122,111 @@ async function generateRandomPrompt() {
   const randomSeed = Math.floor(Math.random() * 1000000);
   
   const themes = [
-    // High-Quality Scenes
     "cinematic cityscape", "golden hour landscape", "dramatic mountain vista", 
     "serene beach sunset", "misty forest morning", "urban street photography",
     "architectural masterpiece", "cozy cafe interior", "luxury penthouse view",
     "historic castle grounds", "modern art gallery", "japanese zen garden",
-
-    // Human-Centric (Professional/Artistic)
     "fashion photography", "street portrait", "dance performance",
     "artist in studio", "chef in kitchen", "musician on stage",
     "athlete in motion", "business professional", "traditional craftsman",
-    
-    // Modern Urban
     "modern downtown", "rooftop lounge", "subway station",
     "city park spring", "night market", "boutique shop",
     "urban garden", "coffee shop", "art district",
-    
-    // Nature & Landscapes
     "alpine lake sunrise", "desert oasis", "tropical beach",
     "autumn forest path", "rolling hills", "crystal cave",
     "northern lights", "cherry blossom garden", "waterfall vista",
-    
-    // Architecture & Interiors
     "modern minimalist", "art deco interior", "gothic cathedral",
     "japanese temple", "scandinavian home", "mediterranean villa",
     "industrial loft", "luxury hotel lobby", "bohemian studio",
-    
-    // Technology & Future
     "smart city", "tech workspace", "innovation lab",
     "electric vehicle", "sustainable architecture", "digital art gallery",
     "modern laboratory", "space observatory", "green technology",
-
-    // Ancient Indian & Hindu Themes
     "ancient vedic ceremony", "rishis meditating in himalayas", "temple architecture",
     "krishna's divine garden", "ancient gurukul", "sacred river ganges",
     "ayodh-ya palace", "himalayan ashram", "ancient sanskrit library",
     "meditation caves", "sacred banyan tree", "temple courtyard",
-    
-    // Natural Wonders
     "himalayan peaks sunrise", "kerala backwaters", "rajasthan desert",
     "valley of flowers", "sundarbans mangrove", "western ghats monsoon",
     "ladakh monastery", "varanasi ghats", "konark sun temple",
-    
-    // Cultural Heritage
     "classical dance performance", "traditional artisan workshop", "ancient marketplace",
     "royal durbar hall", "traditional spice market", "temple festival",
     "classical music concert", "traditional weaver's studio", "ancient astronomical observatory",
-    
-    // Modern India
     "modern mumbai skyline", "tech hub bangalore", "delhi metro station",
     "contemporary art gallery", "fusion restaurant", "urban garden",
-    
-    // Nostalgic Scenes
     "vintage railway station", "old haveli courtyard", "traditional village life",
     "ancient stepwell", "heritage street", "traditional pottery workshop",
-    
-    // Epic Scenes
     "kurukshetra battlefield", "ram setu sunrise", "ancient ayodhya",
     "dwaraka kingdom", "himalayan meditation cave", "sacred forest ashram",
-
-    // Ancient Civilizations
     "mesopotamian ziggurat", "egyptian temple complex", "roman forum at dawn",
     "mayan pyramid ceremony", "angkor wat sunrise", "petra treasury night",
     "ancient chinese palace", "greek acropolis sunset", "persian gardens",
     "viking longship harbor", "aztec temple market", "celtic stone circle",
-
-    // Indian Classical
     "ajanta caves artwork", "ellora temple complex", "thanjavur palace",
     "hampi ruins sunset", "khajuraho temples", "badami cave temples",
     "mahabalipuram shore temple", "golden temple amritsar", "mysore palace diwali",
     "fatehpur sikri court", "amber fort jaipur", "meenakshi temple madurai",
-
-    // Sacred & Spiritual
     "kailash mansarovar", "kedarnath temple snow", "badrinath peaks",
     "jagannath puri temple", "tirupati temple dawn", "somnath temple sunset",
     "rameshwaram corridors", "kashi vishwanath ghat", "bodh gaya morning",
     "haridwar aarti ceremony", "rishikesh ashram", "belur math architecture",
-
-    // Modern Architectural Marvels
     "burj khalifa twilight", "singapore gardens night", "dubai future city",
     "shanghai skyscraper reflections", "tokyo tower rain", "sydney opera house dawn",
     "manhattan aerial sunset", "london shard fog", "moscow city lights",
     "toronto cn tower aurora", "hong kong harbor night", "doha skyline dusk",
-
-    // Natural Phenomena
     "aurora borealis iceland", "sahara desert stars", "great barrier reef",
     "grand canyon lightning", "mount everest sunrise", "victoria falls rainbow",
     "pamukkale thermal pools", "zhangjiajie peaks mist", "antelope canyon light",
     "iceland black beach", "norwegian fjords", "swiss alps glacier",
-
-    // Cultural Heritage
     "japanese tea ceremony", "venetian carnival", "moroccan souk",
     "turkish grand bazaar", "chinese lantern festival", "thai songkran",
     "rio carnival parade", "spanish flamenco", "african tribal ceremony",
     "mongolian eagle hunters", "tibetan butter festival", "irish celtic celebration",
-
-    // Contemporary Urban
     "seoul digital district", "melbourne street art", "berlin wall gallery",
     "amsterdam canal homes", "prague old town square", "kyoto modern contrast",
     "barcelona gothic quarter", "san francisco fog", "chicago river walk",
     "copenhagen bicycle culture", "vienna coffee house", "lisbon tram street",
-
-    // Industrial & Scientific
     "nasa launch facility", "CERN particle detector", "robotics laboratory",
     "hydroelectric dam", "solar farm aerial", "wind turbine farm sunset",
     "submarine dock facility", "aircraft carrier deck", "space station module",
     "quantum computer lab", "fusion reactor core", "deep sea research station",
-
-    // Traditional Arts
     "kabuki theater performance", "kathakali dancer", "beijing opera",
     "ballet rehearsal studio", "symphony orchestra", "glass blowing workshop",
     "marble sculpture studio", "woodblock printing", "ceramic pottery wheel",
     "weaving loom workshop", "metalsmith forge", "calligraphy master",
-
-    // Modern Art & Design
     "contemporary art gallery", "fashion runway show", "design studio workspace",
     "modern dance performance", "digital art installation", "architectural model room",
     "photography darkroom", "recording studio session", "film set lighting",
     "virtual reality lab", "3D printing facility", "motion capture studio",
-
-    // Historical Moments
     "silk road caravan", "medieval tournament", "renaissance workshop",
     "industrial revolution factory", "1920s jazz club", "1950s diner",
     "ancient olympic games", "samurai dojo", "victorian conservatory",
     "colonial trading port", "wild west saloon", "art deco cinema",
-
-    // Futuristic
     "vertical farm interior", "hyperloop station", "quantum city",
     "mars colony dome", "underwater metropolis", "floating sky city",
     "hologram market", "anti-gravity park", "space elevator base",
     "fusion powered city", "bio-luminescent architecture", "nanotech laboratory",
-
-    // Intimate Spaces
     "artisan coffee roastery", "vintage bookstore", "secret garden",
     "greenhouse conservatory", "artist's loft", "watchmaker's workshop",
     "perfume laboratory", "chocolatier kitchen", "violin maker's studio",
     "botanical research lab", "vintage camera shop", "traditional barbershop",
-
-    // Epic Landscapes
     "himalayan monastery", "amazon rainforest canopy", "mongolian steppes",
     "scottish highlands", "new zealand fjords", "indonesian volcanos",
     "namibian desert", "canadian rockies", "patagonian peaks",
     "arctic ice caves", "brazilian waterfalls", "australian outback",
-
-    // Ancient Indian Epics & Mythology
     "krishna's raas leela", "hanuman carrying mountain", "arjuna's archery",
     "rama's coronation", "vishnu on sheshnag", "shiva's meditation",
     "ganga's descent", "buddha's enlightenment", "ashoka's court",
     "chandragupta's durbar", "nalanda university", "takshashila campus",
-
-    // Sacred Architecture
     "kailasa temple ellora", "brihadeshwara dawn", "konark wheel detail",
     "martand sun temple", "dilwara marble work", "aihole temples",
     "pattadakal complex", "modhera sun steps", "sanchi stupa sunrise",
     "elephanta caves", "lepakshi pillars", "vittala temple hampi",
-
-    // Traditional Sciences
     "ancient observatory", "ayurvedic garden", "vedic mathematics class",
     "astronomical instruments", "traditional metallurgy", "ancient surgical tools",
     "water harvesting system", "ancient textile workshop", "medicinal herb garden",
-
-    // Modern Masterpieces
     "lotus temple dusk", "akshardham reflection", "bandra worli sea link",
     "howrah bridge fog", "metro art station", "cyber hub gurgaon",
     "international airport terminal", "modern museum interior", "tech park sunrise",
-
-    // [... hundreds more themes organized by category ...]
   ];
 
   const styles = [
@@ -416,39 +373,27 @@ Rules:
 Example format: "Ultra-detailed 8K photograph of [scene description], [lighting details], [atmosphere], [technical aspects], photorealistic quality"`;
   
   try {
-    // First try with Gemini API 1
     try {
       const model = genAI1.getGenerativeModel({ model: "gemini-2.0-flash" });
       const result = await model.generateContent(systemPrompt);
       return result.response.text().trim();
     } catch (error) {
       console.error("First Gemini API key failed:", error);
-      
-      // Second try with Gemini API 2
       try {
-      const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
-      const result = await model.generateContent(systemPrompt);
-      return result.response.text().trim();
+        const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const result = await model.generateContent(systemPrompt);
+        return result.response.text().trim();
       } catch (error) {
         console.error("Second Gemini API key failed:", error);
-        
-        // Fallback to Pollinations text API
         const response = await axios.post('https://text.pollinations.ai/', {
           messages: [
-            {
-              role: "system",
-              content: systemPrompt
-            },
-            {
-              role: "user",
-              content: "Generate a unique image prompt"
-            }
+            { role: "system", content: systemPrompt },
+            { role: "user", content: "Generate a unique image prompt" }
           ],
           model: "mistral",
           private: true,
           seed: randomSeed
         });
-        
         return response.data.trim();
       }
     }
@@ -459,28 +404,28 @@ Example format: "Ultra-detailed 8K photograph of [scene description], [lighting 
 }
 
 async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
+  const seed = Math.floor(Math.random() * 999999) + 1;
+  const proxyUrl = getRandomProxy();
+  const agent = new HttpsProxyAgent(proxyUrl); // Updated constructor
+
   try {
-    const seed = Math.floor(Math.random() * 999999) + 1;
-    
     if (model === MODELS.GEMINI) {
       try {
-        const model = genAI1.getGenerativeModel({
+        const modelInstance = genAI1.getGenerativeModel({
           model: "gemini-2.0-flash-exp-image-generation",
           generationConfig: {
             responseModalities: ['Text', 'Image']
           },
         });
 
-        const result = await model.generateContent(`Generate an image for this prompt: ${prompt}`);
-        
+        const result = await modelInstance.generateContent(`Generate an image for this prompt: ${prompt}`);
         for (const part of result.response.candidates[0].content.parts) {
           if (part.inlineData) {
             const fileName = `gemini-${Date.now()}-${Math.random().toString(36).substring(7)}.png`;
             const filePath = path.join(tempDir, fileName);
-            
             const imageBuffer = Buffer.from(part.inlineData.data, 'base64');
             fs.writeFileSync(filePath, imageBuffer);
-            
+            console.log(`[SUCCESS] Proxy ${proxyUrl} succeeded for Gemini`);
             return `${process.env.WEBHOOK_URL}/temp/${fileName}`;
           }
         }
@@ -496,6 +441,7 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
           "content-type": "text/plain;charset=UTF-8" 
         },
         timeout: 15000,
+        httpsAgent: agent,
       };
       
       const response = await axios.post(
@@ -507,14 +453,58 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
         }),
         config
       );
+      console.log(`[SUCCESS] Proxy ${proxyUrl} succeeded for Raider`);
       return response.data.url;
     } else {
       const encodedPrompt = encodeURIComponent(prompt);
-      return `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${model}&seed=${seed}&nologo=true&private=true&safe=false`;
+      const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${model}&seed=${seed}&nologo=true&private=true&safe=false`;
+      const response = await axios.get(url, {
+        httpsAgent: agent,
+        timeout: 15000,
+      });
+      console.log(`[SUCCESS] Proxy ${proxyUrl} succeeded for ${model}`);
+      return url;
     }
   } catch (error) {
-    console.error("Image generation error:", error);
-    throw error;
+    console.log(`[ERROR] Proxy ${proxyUrl} failed: ${error.message}`);
+    const newProxyUrl = getRandomProxy();
+    const newAgent = new HttpsProxyAgent(newProxyUrl); // Updated constructor
+    try {
+      if (model === MODELS.RAIDER) {
+        const config = {
+          headers: { 
+            "accept": "*/*", 
+            "content-type": "text/plain;charset=UTF-8" 
+          },
+          timeout: 15000,
+          httpsAgent: newAgent,
+        };
+        const response = await axios.post(
+          "https://websim.ai/api/v1/inference/run_image_generation",
+          JSON.stringify({
+            project_id: "kx0m131_rzz66qb2xoy7",
+            prompt,
+            aspect_ratio: aspectRatio,
+          }),
+          config
+        );
+        console.log(`[SUCCESS] Retry proxy ${newProxyUrl} succeeded for Raider`);
+        return response.data.url;
+      } else if (model !== MODELS.GEMINI) {
+        const encodedPrompt = encodeURIComponent(prompt);
+        const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${model}&seed=${seed}&nologo=true&private=true&safe=false`;
+        const response = await axios.get(url, {
+          httpsAgent: newAgent,
+          timeout: 15000,
+        });
+        console.log(`[SUCCESS] Retry proxy ${newProxyUrl} succeeded for ${model}`);
+        return url;
+      }
+      throw error;
+    } catch (retryError) {
+      console.error("Image generation error after retry:", retryError);
+      throw retryError;
+    }
   }
 }
 
@@ -549,7 +539,7 @@ async function processImageQueue() {
 
       await bot.sendPhoto(chatId, imageUrl, {
         caption: isRandomPrompt 
-          ? `✨ Generated using ${displayModelName}`  // No prompt for random generations
+          ? `✨ Generated using ${displayModelName}` 
           : `✨ Generated using ${displayModelName}\n\nPrompt:\n\`${prompt}\``,
         parse_mode: 'Markdown'
       });
@@ -675,7 +665,7 @@ app.post("/webhook", async (req, res) => {
         const randomPrompt = await generateRandomPrompt();
         await bot.sendMessage(chatId, 
           `🎨 Random Prompt:\n\`${randomPrompt}\``, 
-          { parse_mode: 'Markdown' }  // Only keeping Markdown formatting for copiable text
+          { parse_mode: 'Markdown' }
         );
       } catch (error) {
         console.error("Random prompt generation error:", error);
@@ -693,11 +683,10 @@ app.post("/webhook", async (req, res) => {
           prompt: randomPrompt, 
           model, 
           userInfo,
-          isRandomPrompt: true // Add this flag
+          isRandomPrompt: true
         });
 
         await bot.sendMessage(chatId, 
-          // `🎨 Queued random prompt for generation:\n\`${randomPrompt}\`\n\nModel: ${modelNames[model]}`,
           `🎨 Queued random prompt for generation...`
         );
         
@@ -790,7 +779,6 @@ app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 });
 
-// Update the callback query handler
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
 
@@ -799,7 +787,6 @@ bot.on('callback_query', async (query) => {
     const prompt = global.promptCache.get(promptId);
     
     if (prompt) {
-      // Send prompt as a separate message for easy copying
       await bot.sendMessage(chatId, 
         `\`${prompt}\``,
         { parse_mode: 'Markdown' }
