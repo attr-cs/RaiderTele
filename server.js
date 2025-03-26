@@ -133,7 +133,35 @@ async function generateRandomPrompt() {
     // Technology & Future
     "smart city", "tech workspace", "innovation lab",
     "electric vehicle", "sustainable architecture", "digital art gallery",
-    "modern laboratory", "space observatory", "green technology"
+    "modern laboratory", "space observatory", "green technology",
+
+    // Ancient Indian & Hindu Themes
+    "ancient vedic ceremony", "rishis meditating in himalayas", "temple architecture",
+    "krishna's divine garden", "ancient gurukul", "sacred river ganges",
+    "ayodhya palace", "himalayan ashram", "ancient sanskrit library",
+    "meditation caves", "sacred banyan tree", "temple courtyard",
+    
+    // Natural Wonders
+    "himalayan peaks sunrise", "kerala backwaters", "rajasthan desert",
+    "valley of flowers", "sundarbans mangrove", "western ghats monsoon",
+    "ladakh monastery", "varanasi ghats", "konark sun temple",
+    
+    // Cultural Heritage
+    "classical dance performance", "traditional artisan workshop", "ancient marketplace",
+    "royal durbar hall", "traditional spice market", "temple festival",
+    "classical music concert", "traditional weaver's studio", "ancient astronomical observatory",
+    
+    // Modern India
+    "modern mumbai skyline", "tech hub bangalore", "delhi metro station",
+    "contemporary art gallery", "fusion restaurant", "urban garden",
+    
+    // Nostalgic Scenes
+    "vintage railway station", "old haveli courtyard", "traditional village life",
+    "ancient stepwell", "heritage street", "traditional pottery workshop",
+    
+    // Epic Scenes
+    "kurukshetra battlefield", "ram setu sunrise", "ancient ayodhya",
+    "dwaraka kingdom", "himalayan meditation cave", "sacred forest ashram"
   ];
 
   const styles = [
@@ -141,14 +169,19 @@ async function generateRandomPrompt() {
     "editorial", "architectural", "fashion photography",
     "portrait", "landscape", "studio lighting",
     "golden hour", "blue hour", "natural light",
-    "high-end commercial", "magazine style", "fine art"
+    "high-end commercial", "magazine style", "fine art",
+    "ultra realistic", "photorealistic 8k", "cinematic 8k",
+    "professional photography", "national geographic", "architectural photography",
+    "documentary style", "fine art", "editorial photography"
   ];
 
   const moods = [
     "elegant", "professional", "sophisticated",
     "peaceful", "energetic", "dramatic",
     "warm", "clean", "modern",
-    "natural", "refined", "authentic"
+    "natural", "refined", "authentic",
+    "serene", "mystical", "timeless", "majestic", "ethereal",
+    "peaceful", "dramatic", "nostalgic", "contemplative", "divine"
   ];
 
   const timeOfDay = [
@@ -166,10 +199,9 @@ async function generateRandomPrompt() {
   ];
 
   const lighting = [
-    "volumetric rays", "quantum luminescence", "temporal glow",
-    "dimensional radiance", "synthetic illumination", "neural light",
-    "bio-digital emission", "probability shine", "parallel beam",
-    
+    "golden hour", "morning rays", "divine light", "natural sunlight",
+    "dramatic shadows", "soft diffused", "atmospheric", "rim lighting",
+    "volumetric light", "celestial glow"
   ];
 
   const atmospheres = [
@@ -199,6 +231,12 @@ async function generateRandomPrompt() {
     "probability design", "parallel structure", "quantum order",
   ];
 
+  const qualityEnhancements = [
+    "8K resolution", "ultra-detailed", "photorealistic", "high dynamic range",
+    "sharp focus", "crystal clear", "professional grade", "masterfully composed",
+    "studio quality", "magazine quality"
+  ];
+
   const randomTheme = themes[Math.floor(Math.random() * themes.length)];
   const randomStyle = styles[Math.floor(Math.random() * styles.length)];
   const randomMood = moods[Math.floor(Math.random() * moods.length)];
@@ -209,27 +247,27 @@ async function generateRandomPrompt() {
   const randomTexture = textures[Math.floor(Math.random() * textures.length)];
   const randomColor = colors[Math.floor(Math.random() * colors.length)];
   const randomComposition = compositions[Math.floor(Math.random() * compositions.length)];
+  const randomQuality = qualityEnhancements[Math.floor(Math.random() * qualityEnhancements.length)];
 
-  const systemPrompt = `Create a professional, high-quality image generation prompt combining these elements:
+  const systemPrompt = `Create a single high-quality image generation prompt.
 Theme: "${randomTheme}"
 Style: "${randomStyle}"
 Mood: "${randomMood}"
-Time: "${randomTime}"
-Perspective: "${randomPerspective}"
+Lighting: "${randomLighting}"
+Quality: "${randomQuality}"
 
 Rules:
-- Create a clear, specific, and professional description
-- Focus on photographic or cinematic quality
-- Include specific lighting and atmosphere details
-- Add professional photography terms when relevant
-- Emphasize composition and visual impact
-- Keep descriptions grounded and realistic
-- Avoid fantasy or surreal elements unless specifically requested
-- Include technical details that enhance image quality
-- Focus on creating magazine-quality visuals
-- When including people, focus on professional or artistic contexts
+- Return ONLY the final prompt text
+- Focus on photorealistic quality and rich details
+- Include specific lighting and atmosphere
+- Keep descriptions clear and impactful
+- Emphasize professional photography elements
+- Add technical quality terms (8K, ultra-detailed, etc.)
+- Make each prompt unique and specific
+- Maintain realism and authenticity
+- Create magazine-worthy descriptions
 
-The prompt should read as a professional photography or cinematography direction.`;
+Example format: "Ultra-detailed 8K photograph of [scene description], [lighting details], [atmosphere], [technical aspects], photorealistic quality"`;
   
   try {
     // First try with Gemini API 1
