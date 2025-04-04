@@ -129,13 +129,58 @@
     let trafficData = [];
     const defaultModel = 'flux';
 
-    socket.on("adminLoginResponse", ({ success }) => {
-      if (success) {
+    // Check authentication on page load
+    function checkAuth() {
+      const token = localStorage.getItem("adminToken");
+      if (token) {
+        socket.emit("verifyToken", token);
+      } else {
+        document.getElementById("login").style.display = "block";
+        document.getElementById("container").style.display = "none";
+      }
+    }
+
+    socket.on("adminLoginResponse", ({ success, token, error }) => {
+      if (success && token) {
+        localStorage.setItem("adminToken", token);
         document.getElementById("login").style.display = "none";
         document.getElementById("container").style.display = "flex";
         loadInitialData();
       } else {
-        alert("Invalid password!");
+        alert(error || "Invalid password!");
+      }
+    });
+
+    socket.on("tokenVerification", ({ valid }) => {
+      if (valid) {
+        document.getElementById("login").style.display = "none";
+        document.getElementById("container").style.display = "flex";
+        loadInitialData();
+      } else {
+        localStorage.removeItem("adminToken");
+        document.getElementById("login").style.display = "block";
+        document.getElementById("container").style.display = "none";
+      }
+    });
+
+    socket.on("botStatusChange", ({ status }) => {
+      const statusSpan = document.getElementById("botStatus");
+      switch(status) {
+        case "active":
+          statusSpan.textContent = "Active ✅";
+          document.getElementById("startBtn").disabled = true;
+          document.getElementById("stopBtn").disabled = false;
+          break;
+        case "inactive":
+          statusSpan.textContent = "Inactive ❌";
+          document.getElementById("startBtn").disabled = false;
+          document.getElementById("stopBtn").disabled = true;
+          break;
+        case "restarting":
+          statusSpan.textContent = "Restarting 🔄";
+          document.getElementById("startBtn").disabled = true;
+          document.getElementById("stopBtn").disabled = true;
+          break;
       }
     });
 
@@ -143,6 +188,13 @@
       const password = document.getElementById("adminPassword").value;
       socket.emit("adminLogin", password);
     }
+
+    // Add event listener for Enter key in password input
+    document.getElementById("adminPassword").addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        login();
+      }
+    });
 
     function startBot() {
       socket.emit("startBot");
@@ -223,7 +275,7 @@
       });
     });
 
-    socket.on("userStats", (stats) => {
+    socket.on("userStats", async (stats) => {
       const modelNames = {
         'raider': 'Raider',
         'flux': 'Flux',
@@ -232,9 +284,49 @@
       };
       
       const userStatsDiv = document.getElementById("userStats");
-      userStatsDiv.innerHTML = stats.map(stat => 
-        `<p>${stat.userId} - Images: ${stat.imageCount} - Default Model: ${modelNames[stat.defaultModel] || stat.defaultModel}</p>`
-      ).join("");
+      let statsHtml = '<table style="width:100%; border-collapse: collapse;">';
+      statsHtml += `
+        <tr style="background-color: #444; text-align: left;">
+          <th style="padding: 8px;">User Info</th>
+          <th style="padding: 8px;">Username</th>
+          <th style="padding: 8px;">Images</th>
+          <th style="padding: 8px;">Model</th>
+          <th style="padding: 8px;">Status</th>
+        </tr>
+      `;
+      
+      stats.forEach((stat) => {
+        const userDisplayName = stat.user ? 
+          `${stat.user.firstName || ''} ${stat.user.lastName || ''}`.trim() : 
+          'Unknown';
+        const username = stat.user?.username ? `@${stat.user.username}` : 'N/A';
+        
+        statsHtml += `
+          <tr style="border-bottom: 1px solid #444;">
+            <td style="padding: 8px;">
+              ${userDisplayName}
+              <br>
+              <small style="color: #888;">ID: ${stat.userId}</small>
+            </td>
+            <td style="padding: 8px;">
+              ${username}
+              ${stat.user?.username ? 
+                `<a href="https://t.me/${stat.user.username}" target="_blank" style="color: #007bff; text-decoration: none;"> 🔗</a>` : 
+                ''}
+            </td>
+            <td style="padding: 8px;">${stat.imageCount || 0}</td>
+            <td style="padding: 8px;">${modelNames[stat.defaultModel] || stat.defaultModel || 'Default'}</td>
+            <td style="padding: 8px;">
+              ${stat.isBlocked ? 
+                '<span style="color: #ff4444;">Blocked</span>' : 
+                '<span style="color: #44ff44;">Active</span>'}
+            </td>
+          </tr>
+        `;
+      });
+      
+      statsHtml += '</table>';
+      userStatsDiv.innerHTML = statsHtml;
     });
 
     function loadInitialData() {
@@ -245,7 +337,8 @@
       document.getElementById("botStatus").textContent = "Inactive";
     }
 
-    document.getElementById("login").style.display = "block";
+    // Call checkAuth when the page loads
+    checkAuth();
 
     // In any model descriptions in the HTML/JavaScript
     modelDescriptions = {

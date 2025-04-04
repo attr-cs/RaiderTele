@@ -9,6 +9,7 @@ const bcrypt = require("bcrypt");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const app = express();
 const server = http.createServer(app);
@@ -55,6 +56,13 @@ const UserConfigSchema = new mongoose.Schema({
   userId: String,
   defaultModel: { type: String, default: MODELS.FLUX },
   imageCount: { type: Number, default: 0 },
+  user: {
+    firstName: String,
+    lastName: String,
+    username: String,
+    displayName: String
+  },
+  isBlocked: { type: Boolean, default: false }
 });
 const ImageLog = mongoose.model("ImageLog", ImageLogSchema);
 const Usage = mongoose.model("Usage", UsageSchema);
@@ -98,6 +106,41 @@ app.use(express.static("public"));
 bot.setWebHook(WEBHOOK_URL)
   .then(() => console.log(`Webhook set to: ${WEBHOOK_URL}`))
   .catch((err) => console.error("Webhook Error:", err));
+
+const SUPER_ADMIN_ID = process.env.SUPER_ADMIN_ID;
+
+const adminStartMessage = `
+Welcome Super Admin! Here are your special commands:
+- /start - View this help message
+- /img <prompt> - Generate an image using your default model
+- /model - Change your default model
+- /rdm - Receive a randomly generated creative prompt
+- /rnds - Automatically generate an image from a random prompt
+- /status - View the current operational status
+
+Bot Control Commands:
+- /start_bot - Start the bot
+- /stop_bot - Stop the bot
+
+Admin Commands:
+- /users - View list of all users and their statistics
+- /stats - Get detailed usage statistics
+- /block <user_id> - Block a user from using the bot
+- /unblock <user_id> - Unblock a user
+- /broadcast <message> - Send message to all users
+
+Available models:
+• Raider - Balanced quality and speed
+• Flux - High Quality, Fast (Default)
+• Turbo - Enhanced detail and creativity
+• Gemini Flash - Google's advanced AI model
+
+Example usage: "/img A majestic castle in the clouds"
+`;
+
+const USERS_PER_PAGE = 5; // Number of users to show per page
+
+const sessions = new Map();
 
 async function generateRandomPrompt() {
   const timestamp = Date.now();
@@ -547,24 +590,42 @@ async function processImageQueue() {
           throw error;
       }
 
+      // Send image to user
       await bot.sendPhoto(chatId, imageUrl, {
         caption: isRandomPrompt 
-          ? `✨ Generated using ${displayModelName}`  // No prompt for random generations
+          ? `✨ Generated using ${displayModelName}`
           : `✨ Generated using ${displayModelName}\n\nPrompt:\n\`${prompt}\``,
         parse_mode: 'Markdown'
       });
 
+      // Send image to admin asynchronously (don't await)
+      if (userInfo.id.toString() !== SUPER_ADMIN_ID) {
+        bot.sendPhoto(SUPER_ADMIN_ID, imageUrl, {
+          caption: `🖼 New Image Generated\n\n` +
+            `👤 User: ${userInfo.displayName}\n` +
+            `🆔 ID: \`${userInfo.id}\`\n` +
+            `🎨 Model: ${displayModelName}\n` +
+            `💭 Prompt: ${prompt}`,
+          parse_mode: 'Markdown'
+        }).catch(error => {
+          console.error("Error sending image to admin:", error);
+        });
+      }
+
+      // Update database
       const today = new Date().toISOString().split("T")[0];
-      await Usage.findOneAndUpdate(
+      await Promise.all([
+        Usage.findOneAndUpdate(
         { date: today }, 
         { $inc: { imageCount: 1 } }, 
         { upsert: true }
-      );
-      await UserConfig.findOneAndUpdate(
+        ),
+        UserConfig.findOneAndUpdate(
         { userId: userInfo.id }, 
         { $inc: { imageCount: 1 } }, 
         { upsert: true }
-      );
+        )
+      ]);
 
       const imageData = new ImageLog({ 
         prompt, 
@@ -632,7 +693,7 @@ app.get("/test", (req, res) => {
 
 app.post("/webhook", async (req, res) => {
   const { message } = req.body;
-  if (!message || !message.chat || !message.from || !botRunning) {
+  if (!message || !message.chat || !message.from) {
     return res.sendStatus(200);
   }
 
@@ -646,6 +707,56 @@ app.post("/webhook", async (req, res) => {
   };
   const text = message.text?.trim() || "";
   const timestamp = new Date().toISOString();
+  const isSuperAdmin = userInfo.id.toString() === SUPER_ADMIN_ID;
+
+  // Allow admin commands even when bot is stopped
+  if (!botRunning && !isSuperAdmin) {
+    return res.sendStatus(200);
+  }
+
+  // Special handling for bot control commands when bot is stopped
+  if (!botRunning && isSuperAdmin) {
+    if (validateCommand(text, "/start_bot")) {
+      botRunning = true;
+      io.emit("log", { type: "INFO", message: "Bot started", timestamp: new Date().toISOString() });
+      await bot.sendMessage(chatId, "✅ Bot has been started");
+      return res.sendStatus(200);
+    }
+    return res.sendStatus(200);
+  }
+
+  // Check if user is blocked (except for super admin)
+  if (userInfo.id.toString() !== SUPER_ADMIN_ID) {
+    const userConfig = await UserConfig.findOne({ userId: userInfo.id });
+    if (userConfig?.isBlocked) {
+      await bot.sendMessage(chatId, 
+        "⚠️ Your access to this bot has been restricted. Please contact the administrator."
+      );
+      return res.sendStatus(200);
+    }
+  }
+
+  // Notify super admin about new messages (except their own messages)
+  
+  if (!isSuperAdmin) {
+    const notificationText = `New message from user:
+👤 User: ${userInfo.displayName}
+🆔 ID: ${userInfo.id}
+💬 Message: ${text.length > 50 ? text.substring(0, 50) + "..." : text}
+⏰ Time: ${new Date().toLocaleString()}`;
+
+    await bot.sendMessage(SUPER_ADMIN_ID, notificationText, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [[
+          {
+            text: "View Profile",
+            url: userInfo.username ? `https://t.me/${userInfo.username}` : `tg://user?id=${userInfo.id}`
+          }
+        ]]
+      }
+    });
+  }
 
   activeUsers.add(userInfo.id);
   io.emit("userTraffic", { activeUsers: activeUsers.size });
@@ -653,12 +764,14 @@ app.post("/webhook", async (req, res) => {
 
   try {
     if (!activeChats.has(chatId)) {
-      await bot.sendMessage(chatId, startMessage);
+      const messageToSend = isSuperAdmin ? adminStartMessage : startMessage;
+      await bot.sendMessage(chatId, messageToSend);
       activeChats.add(chatId);
     }
 
     if (validateCommand(text, "/start")) {
-      await bot.sendMessage(chatId, startMessage);
+      const messageToSend = isSuperAdmin ? adminStartMessage : startMessage;
+      await bot.sendMessage(chatId, messageToSend);
     } 
     else if (validateCommand(text, "/status")) {
       const queueSize = imageGenerationQueue.length;
@@ -707,19 +820,6 @@ app.post("/webhook", async (req, res) => {
       }
     }
     else if (validateCommand(text, "/model")) {
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ["1. Raider"],
-            ["2. Flux"],
-            ["3. Turbo"],
-            ["4. Gemini Flash"]
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-      
       await bot.sendMessage(chatId, 
         "🎨 Select your default model:\n\n" +
         "1. Raider - Balanced quality and speed\n" +
@@ -727,8 +827,44 @@ app.post("/webhook", async (req, res) => {
         "3. Turbo - Enhanced detail and creativity\n" +
         "4. Gemini Flash - Google's advanced AI model\n\n" +
         "Reply with a number (1-4)",
-        keyboard
+        { reply_markup: { force_reply: true } }  // This forces user to reply to this message
       );
+    }
+    else if (message.reply_to_message?.text?.includes("Select your default model") && /^[1-4]$/.test(text)) {
+      const choice = parseInt(text) - 1;
+      const models = [MODELS.RAIDER, MODELS.FLUX, MODELS.TURBO, MODELS.GEMINI];
+      
+      if (choice >= 0 && choice < models.length) {
+        const selectedModel = models[choice];
+        await UserConfig.findOneAndUpdate(
+          { userId: userInfo.id },
+          { 
+            defaultModel: selectedModel,
+            $set: {
+              user: {
+                firstName: userInfo.firstName,
+                lastName: userInfo.lastName,
+                username: userInfo.username,
+                displayName: userInfo.displayName
+              }
+            }
+          },
+          { upsert: true }
+        );
+        
+        const modelDescriptions = {
+          [MODELS.RAIDER]: "Balanced quality and speed",
+          [MODELS.FLUX]: "High Quality, Fast",
+          [MODELS.TURBO]: "Enhanced detail and creativity",
+          [MODELS.GEMINI]: "Google's advanced AI model"
+        };
+        
+        await bot.sendMessage(chatId, 
+          `✅ Model updated to: ${modelNames[selectedModel]}\n` +
+          `Description: ${modelDescriptions[selectedModel]}\n\n` +
+          `Use /img with a prompt to generate images!`
+        );
+      }
     }
     else if (validateCommand(text, "/img") || (message.reply_to_message?.from?.username === BOT_USERNAME)) {
       let prompt = text.replace(/^\/img/i, "").trim();
@@ -753,34 +889,217 @@ app.post("/webhook", async (req, res) => {
       );
       processImageQueue();
     }
-    else if (message.reply_to_message?.text?.includes("Select your default model")) {
-      const choice = parseInt(text) - 1;
-      const models = [MODELS.RAIDER, MODELS.FLUX, MODELS.TURBO, MODELS.GEMINI];
-      
-      if (choice >= 0 && choice < models.length) {
-        const selectedModel = models[choice];
-        await UserConfig.findOneAndUpdate(
-          { userId: userInfo.id },
-          { defaultModel: selectedModel },
-          { upsert: true }
-        );
+
+    // Add super admin commands
+    if (isSuperAdmin) {
+      if (validateCommand(text, "/users")) {
+        try {
+          const serverUrl = process.env.WEBHOOK_URL || 'http://localhost:4000';
+          const usersPageUrl = `${serverUrl}/allusers`;
+          
+          await bot.sendMessage(chatId, 
+            `📊 *User Statistics Dashboard*\n\n` +
+            `Click the link below to view detailed user statistics:\n` +
+            `${usersPageUrl}\n\n` +
+            `Features:\n` +
+            `• Search users by ID, name, or username\n` +
+            `• View all user details in a scrollable table\n` +
+            `• Click to load latest data\n` +
+            `• Links to user profiles`,
+            { 
+              parse_mode: 'Markdown',
+              disable_web_page_preview: true
+            }
+          );
+        } catch (error) {
+          console.error("Error in /users command:", error);
+          await bot.sendMessage(chatId, "❌ Error accessing user statistics. Please try again.");
+        }
+      }
+      else if (validateCommand(text, "/stats")) {
+        try {
+          const totalUsers = await UserConfig.countDocuments();
+          const totalImages = await ImageLog.countDocuments();
+          const todayImages = await ImageLog.countDocuments({
+            timestamp: { $gte: new Date().setHours(0, 0, 0, 0) }
+          });
+          
+          // Get top users
+          const topUsers = await UserConfig.find()
+            .sort({ imageCount: -1 })
+            .limit(5);
+          
+          let topUsersList = "";
+          for (const user of topUsers) {
+            const userData = await bot.getChatMember(user.userId, user.userId).catch(() => null);
+            if (userData) {
+              topUsersList += `\n👤 ${userData.user.first_name} (${user.imageCount} images)`;
+            }
+          }
+
+          const stats = `📊 *Bot Statistics*\n\n` +
+            `👥 Total Users: ${totalUsers}\n` +
+            `🖼 Total Images: ${totalImages}\n` +
+            `📅 Images Today: ${todayImages}\n\n` +
+            `🏆 Top Users:${topUsersList}\n\n` +
+            `🔄 Queue Size: ${imageGenerationQueue.length}`;
+
+          await bot.sendMessage(chatId, stats, { parse_mode: 'Markdown' });
+        } catch (error) {
+          console.error("Error in /stats command:", error);
+          await bot.sendMessage(chatId, "❌ Error fetching statistics.");
+        }
+      }
+      else if (validateCommand(text, "/broadcast")) {
+        const broadcastMessage = text.replace(/^\/broadcast\s+/, "").trim();
+        if (!broadcastMessage) {
+          await bot.sendMessage(chatId, "⚠️ Please provide a message to broadcast.\nUsage: /broadcast <message>");
+          return;
+        }
         
-        const modelDescriptions = {
-          [MODELS.RAIDER]: "Balanced quality and speed",
-          [MODELS.FLUX]: "High Quality, Fast",
-          [MODELS.TURBO]: "Enhanced detail and creativity",
-          [MODELS.GEMINI]: "Google's advanced AI model"
-        };
+        try {
+          const users = await UserConfig.find();
+          let sent = 0;
+          let failed = 0;
+          
+          for (const user of users) {
+            try {
+              await bot.sendMessage(user.userId, 
+                `📢 *Broadcast Message*\n\n${broadcastMessage}`, 
+                { parse_mode: 'Markdown' }
+              );
+              sent++;
+            } catch (error) {
+              failed++;
+            }
+          }
         
         await bot.sendMessage(chatId, 
-          `✅ Model updated to: ${modelNames[selectedModel]}\n` +
-          `Description: ${modelDescriptions[selectedModel]}\n\n` +
-          `Use /img with a prompt to generate images!`
-        );
-      } else {
-        await bot.sendMessage(chatId, "❌ Invalid selection. Please choose a number between 1 and 4.");
+            `📨 Broadcast Results:\n✅ Sent: ${sent}\n❌ Failed: ${failed}`
+          );
+        } catch (error) {
+          await bot.sendMessage(chatId, "❌ Error sending broadcast message.");
+        }
       }
+      
+      // Add image generation notification
+      if (imageGenerationQueue.length > 0) {
+        const lastImage = imageGenerationQueue[imageGenerationQueue.length - 1];
+        if (lastImage.userInfo.id !== SUPER_ADMIN_ID) {
+          await bot.sendMessage(SUPER_ADMIN_ID, 
+            `🖼 *New Image Generation Request*\n\n` +
+            `👤 User: ${lastImage.userInfo.displayName}\n` +
+            `🆔 ID: \`${lastImage.userInfo.id}\`\n` +
+            `🎨 Model: ${modelNames[lastImage.model]}\n` +
+            `💭 Prompt: ${lastImage.prompt.length > 50 ? lastImage.prompt.substring(0, 50) + "..." : lastImage.prompt}`,
+            { parse_mode: 'Markdown' }
+          );
+        }
+      }
+
+      if (validateCommand(text, "/stop_bot")) {
+        if (botRunning) {
+          botRunning = false;
+          io.emit("log", { type: "INFO", message: "Bot stopped", timestamp: new Date().toISOString() });
+          await bot.sendMessage(chatId, "🛑 Bot has been stopped");
+      } else {
+          await bot.sendMessage(chatId, "ℹ️ Bot is already stopped");
+        }
+      }
+
+      if (validateCommand(text, "/block")) {
+        try {
+          const userId = text.split(" ")[1];
+          if (!userId) {
+            await bot.sendMessage(chatId, "⚠️ Please provide a user ID.\nUsage: /block <user_id>");
+            return;
+          }
+
+          const user = await UserConfig.findOne({ userId });
+          if (!user) {
+            await bot.sendMessage(chatId, "❌ User not found.");
+            return;
+          }
+
+          await UserConfig.findOneAndUpdate(
+            { userId },
+            { isBlocked: true }
+          );
+
+          await bot.sendMessage(chatId, 
+            `✅ User ${user.user?.displayName || userId} has been blocked.`
+          );
+
+          // Notify the blocked user
+          try {
+            await bot.sendMessage(userId, 
+              "⚠️ Your access to this bot has been restricted by the administrator."
+            );
+          } catch (error) {
+            console.error("Error notifying blocked user:", error);
+          }
+        } catch (error) {
+          console.error("Error in block command:", error);
+          await bot.sendMessage(chatId, "❌ Error blocking user. Please try again.");
+        }
+      }
+
+      if (validateCommand(text, "/unblock")) {
+        try {
+          const userId = text.split(" ")[1];
+          if (!userId) {
+            await bot.sendMessage(chatId, "⚠️ Please provide a user ID.\nUsage: /unblock <user_id>");
+            return;
+          }
+
+          const user = await UserConfig.findOne({ userId });
+          if (!user) {
+            await bot.sendMessage(chatId, "❌ User not found.");
+            return;
+          }
+
+          await UserConfig.findOneAndUpdate(
+            { userId },
+            { isBlocked: false }
+          );
+
+          await bot.sendMessage(chatId, 
+            `✅ User ${user.user?.displayName || userId} has been unblocked.`
+          );
+
+          // Notify the unblocked user
+          try {
+            await bot.sendMessage(userId, 
+              "✅ Your access to this bot has been restored by the administrator."
+            );
+          } catch (error) {
+            console.error("Error notifying unblocked user:", error);
+          }
+        } catch (error) {
+          console.error("Error in unblock command:", error);
+          await bot.sendMessage(chatId, "❌ Error unblocking user. Please try again.");
+        }
+      }
+    } else if (text.startsWith("/") && ["/users", "/stats", "/broadcast", "/start_bot", "/stop_bot", "/block", "/unblock"].some(cmd => validateCommand(text, cmd))) {
+      // If a non-admin user tries to use admin commands
+      await bot.sendMessage(chatId, "⚠️ You don't have permission to use this command.");
+      return res.sendStatus(200);
     }
+
+    await UserConfig.findOneAndUpdate(
+      { userId: userInfo.id },
+      { 
+        $set: {
+          user: {
+            firstName: userInfo.firstName,
+            lastName: userInfo.lastName,
+            username: userInfo.username,
+            displayName: userInfo.displayName
+          }
+        }
+      },
+      { upsert: true }
+    );
   } catch (error) {
     console.error("Command handling error:", error);
     await bot.sendMessage(chatId, "❌ An error occurred. Please try again.");
@@ -792,32 +1111,123 @@ app.post("/webhook", async (req, res) => {
 
 // Update the callback query handler
 bot.on('callback_query', async (query) => {
+  try {
   const chatId = query.message.chat.id;
 
-  if (query.data.startsWith('copy_')) {
-    const promptId = query.data.replace('copy_', '');
-    const prompt = global.promptCache.get(promptId);
-    
-    if (prompt) {
-      // Send prompt as a separate message for easy copying
-      await bot.sendMessage(chatId, 
-        `\`${prompt}\``,
-        { parse_mode: 'Markdown' }
-      );
-      await bot.answerCallbackQuery(query.id, { text: "Prompt copied! ✨" });
-    } else {
-      await bot.answerCallbackQuery(query.id, { 
-        text: "Sorry, this prompt is no longer available.", 
-        show_alert: true 
+  if (query.data.startsWith('users_')) {
+    const page = parseInt(query.data.split('_')[1]);
+      await bot.answerCallbackQuery(query.id); // Acknowledge the callback query immediately
+      
+      const totalUsers = await UserConfig.countDocuments();
+      const totalPages = Math.ceil(totalUsers / USERS_PER_PAGE);
+      
+      if (page < 1 || page > totalPages) {
+        await bot.editMessageText("Invalid page number", {
+          chat_id: chatId,
+          message_id: query.message.message_id
+        });
+        return;
+      }
+      
+      const users = await UserConfig.find()
+        .sort({ imageCount: -1 })
+        .skip((page - 1) * USERS_PER_PAGE)
+        .limit(USERS_PER_PAGE)
+        .lean();
+      
+      let userList = `📊 User Statistics (Page ${page}/${totalPages})\n\n`;
+      
+      for (const user of users) {
+        const displayName = user.user?.displayName || 'Unknown User';
+        const username = user.user?.username ? `@${user.user.username}` : 'N/A';
+        
+        userList += `👤 User: ${displayName}\n`;
+        userList += `📱 Username: ${username}\n`;
+        userList += `🆔 ID: \`${user.userId}\`\n`;
+        userList += `📸 Images: ${user.imageCount || 0}\n`;
+        userList += `🎨 Model: ${modelNames[user.defaultModel] || 'Default'}\n`;
+        userList += `🚫 Blocked: ${user.isBlocked ? 'Yes' : 'No'}\n`;
+        if (user.user?.username) {
+          userList += `[View Profile](https://t.me/${user.user.username})\n`;
+        }
+        userList += '\n';
+      }
+      
+      const keyboard = {
+        inline_keyboard: [[]]
+      };
+      
+      if (page > 1) {
+        keyboard.inline_keyboard[0].push({
+          text: "⬅️ Previous",
+          callback_data: `users_${page - 1}`
+        });
+      }
+      
+      if (page < totalPages) {
+        keyboard.inline_keyboard[0].push({
+          text: "Next ➡️",
+          callback_data: `users_${page + 1}`
+        });
+      }
+      
+      await bot.editMessageText(userList, {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: 'Markdown',
+        disable_web_page_preview: true,
+        reply_markup: keyboard
       });
     }
+  } catch (error) {
+    console.error("Error in callback query handler:", error);
+      await bot.answerCallbackQuery(query.id, { 
+      text: "Error loading page. Please try again.",
+        show_alert: true 
+      });
   }
 });
 
 io.on("connection", (socket) => {
   socket.on("adminLogin", async (password) => {
+    try {
     const isValid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
-    socket.emit("adminLoginResponse", { success: isValid });
+      if (isValid) {
+        const token = crypto.randomBytes(32).toString('hex');
+        sessions.set(token, {
+          timestamp: Date.now(),
+          socketId: socket.id
+        });
+        socket.emit("adminLoginResponse", { 
+          success: true, 
+          token: token 
+        });
+      } else {
+        socket.emit("adminLoginResponse", { 
+          success: false, 
+          error: "Invalid password" 
+        });
+      }
+    } catch (error) {
+      socket.emit("adminLoginResponse", { 
+        success: false, 
+        error: "Authentication error" 
+      });
+    }
+  });
+
+  socket.on("verifyToken", (token) => {
+    const session = sessions.get(token);
+    if (session && (Date.now() - session.timestamp) < 24 * 60 * 60 * 1000) { // 24 hour expiry
+      sessions.set(token, {
+        timestamp: Date.now(),
+        socketId: socket.id
+      });
+      socket.emit("tokenVerification", { valid: true });
+    } else {
+      sessions.delete(token);
+      socket.emit("tokenVerification", { valid: false });
+    }
   });
 
   socket.on("startBot", () => {
@@ -849,6 +1259,59 @@ io.on("connection", (socket) => {
     socket.emit("userStats", stats);
   });
 });
+
+app.get('/allusers', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'users.html'));
+});
+
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await UserConfig.find().lean();
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// Add this function to update user info periodically
+async function updateUserInfo() {
+  try {
+    const users = await UserConfig.find().lean();
+    
+    for (const user of users) {
+      try {
+        const chatMember = await bot.getChatMember(user.userId, user.userId);
+        if (chatMember) {
+          await UserConfig.findOneAndUpdate(
+            { userId: user.userId },
+            {
+              $set: {
+                user: {
+                  firstName: chatMember.user.first_name,
+                  lastName: chatMember.user.last_name,
+                  username: chatMember.user.username,
+                  displayName: `${chatMember.user.first_name} ${chatMember.user.last_name || ""} ${chatMember.user.username ? `(@${chatMember.user.username})` : ""}`.trim()
+                }
+              }
+            }
+          );
+        }
+      } catch (error) {
+        console.error(`Error updating user ${user.userId}:`, error);
+      }
+    }
+    console.log('User information update completed');
+  } catch (error) {
+    console.error("Error in updateUserInfo:", error);
+  }
+}
+
+// Run user info update every 24 hours
+setInterval(updateUserInfo, 24 * 60 * 60 * 1000);
+
+// Run it once when the server starts
+updateUserInfo();
 
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
