@@ -80,5 +80,6 @@ The admin dashboard is available at the root URL. Login required with admin pass
 ## Available Models
 - Raider - Balanced quality and speed
 - Flux - High Quality, Fast (Default)
+- Imagen3 - High Quality, Multiple Images
 - Turbo - Enhanced detail and creativity
-- Gemini Flash 2.0 - Google's advanced AI model
+- Gemini Flash - Basic image generation

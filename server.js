@@ -27,14 +27,16 @@ const MODELS = {
   RAIDER: "raider",
   FLUX: "flux",
   TURBO: "turbo",
-  GEMINI: "gemini"
+  GEMINI: "gemini",
+  IMAGEN3: "imagen3"
 };
 
 const modelNames = {
   [MODELS.RAIDER]: "Raider",
   [MODELS.FLUX]: "Flux",
   [MODELS.TURBO]: "Turbo",
-  [MODELS.GEMINI]: "Gemini Flash 2.0"
+  [MODELS.GEMINI]: "Gemini Flash 2.0",
+  [MODELS.IMAGEN3]: "Imagen3"
 };
 
 const genAI1 = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -109,6 +111,25 @@ bot.setWebHook(WEBHOOK_URL)
 
 const SUPER_ADMIN_ID = process.env.SUPER_ADMIN_ID;
 
+const startMessage = `
+Greetings! I am your advanced image generation assistant. Here's how to utilize my capabilities:
+- /start - View this help message
+- /img <prompt> - Generate an image using your default model
+- /model - Change your default model
+- /rdm - Receive a randomly generated creative prompt
+- /rnds - Automatically generate an image from a random prompt
+- /status - View the current operational status
+
+Available models:
+• Raider - Balanced quality and speed
+• Flux - High Quality, Fast (Default)
+• Imagen3 - High Quality, Multiple Images
+• Turbo - Enhanced detail and creativity
+• Gemini Flash - Basic image generation
+
+Example usage: "/img A majestic castle in the clouds"
+`;
+
 const adminStartMessage = `
 Welcome Super Admin! Here are your special commands:
 - /start - View this help message
@@ -132,8 +153,9 @@ Admin Commands:
 Available models:
 • Raider - Balanced quality and speed
 • Flux - High Quality, Fast (Default)
+• Imagen3 - High Quality, Multiple Images
 • Turbo - Enhanced detail and creativity
-• Gemini Flash - Google's advanced AI model
+• Gemini Flash - Basic image generation
 
 Example usage: "/img A majestic castle in the clouds"
 `;
@@ -505,7 +527,87 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
   try {
     const seed = Math.floor(Math.random() * 999999) + 1;
     
-    if (model === MODELS.GEMINI) {
+    if (model === MODELS.IMAGEN3) {
+      try {
+        const data = {
+          userInput: {
+            candidatesCount: 4,
+            prompts: [prompt],
+            seed: seed
+          },
+          clientContext: {
+            sessionId: `;${Date.now()}`,
+            tool: "IMAGE_FX"
+          },
+          modelInput: {
+            modelNameType: "IMAGEN_3_1"
+          },
+          aspectRatio: aspectRatio === "16:9" ? "IMAGE_ASPECT_RATIO_LANDSCAPE" : 
+                      aspectRatio === "9:16" ? "IMAGE_ASPECT_RATIO_PORTRAIT" : 
+                      "IMAGE_ASPECT_RATIO_SQUARE"
+        };
+
+        const config = {
+          method: 'post',
+          maxBodyLength: Infinity,
+          url: 'https://aisandbox-pa.googleapis.com/v1:runImageFx',
+          headers: { 
+            'accept': '*/*',
+            'accept-language': 'en-GB,en-US;q=0.9,en;q=0.8,hi;q=0.7',
+            'authorization': `Bearer ${process.env.IMAGEN3_TOKEN}`,
+            'cache-control': 'no-cache',
+            'content-type': 'text/plain;charset=UTF-8',
+            'origin': 'https://labs.google',
+            'pragma': 'no-cache',
+            'priority': 'u=1, i',
+            'referer': 'https://labs.google/',
+            'sec-ch-ua': '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'cross-site',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+            'x-client-data': 'CKW1yQEIhrbJAQijtskBCKmdygEIjYTLAQiWocsBCJSjywEIhaDNAQ=='
+          },
+          data: JSON.stringify(data)
+        };
+
+        const response = await axios.request(config);
+
+        if (response.data?.imagePanels?.[0]?.generatedImages?.length > 0) {
+          const images = response.data.imagePanels[0].generatedImages;
+          const imageUrls = [];
+
+          for (let i = 0; i < images.length; i++) {
+            const image = images[i];
+            if (image.encodedImage) {
+              const fileName = `imagen3-${Date.now()}-${i}-${Math.random().toString(36).substring(7)}.png`;
+              const filePath = path.join(tempDir, fileName);
+              
+              const imageBuffer = Buffer.from(image.encodedImage, 'base64');
+              fs.writeFileSync(filePath, imageBuffer);
+              
+              imageUrls.push(`${process.env.WEBHOOK_URL}/temp/${fileName}`);
+            }
+          }
+
+          if (imageUrls.length === 0) {
+            throw new Error("No valid images found in Imagen3 response");
+          }
+
+          return {
+            urls: imageUrls,
+            isMultiple: true
+          };
+        }
+
+        throw new Error("No valid image data found in Imagen3 response");
+      } catch (error) {
+        console.error("Imagen3 image generation failed:", error.response?.data || error.message);
+        throw error;
+      }
+    } else if (model === MODELS.GEMINI) {
       try {
         const model = genAI1.getGenerativeModel({
           model: "gemini-2.0-flash-exp-image-generation",
@@ -524,7 +626,10 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
             const imageBuffer = Buffer.from(part.inlineData.data, 'base64');
             fs.writeFileSync(filePath, imageBuffer);
             
-            return `${process.env.WEBHOOK_URL}/temp/${fileName}`;
+            return {
+              urls: [`${process.env.WEBHOOK_URL}/temp/${fileName}`],
+              isMultiple: false
+            };
           }
         }
         throw new Error("No image generated by Gemini");
@@ -550,10 +655,18 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
         }),
         config
       );
-      return response.data.url;
+      return {
+        urls: [response.data.url],
+        isMultiple: false
+      };
     } else {
+      // For FLUX, TURBO and any other models
       const encodedPrompt = encodeURIComponent(prompt);
-      return `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${model}&seed=${seed}&nologo=true&private=true&safe=false`;
+      const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&seed=${seed}&private=true&safe=false&aspect_ratio=${aspectRatio}`;
+      return {
+        urls: [imageUrl],
+        isMultiple: false
+      };
     }
   } catch (error) {
     console.error("Image generation error:", error);
@@ -579,28 +692,56 @@ async function processImageQueue() {
       });
       
       await bot.sendMessage(chatId, 
-        `Generating image using ${displayModelName} for:\n\`${prompt}\``,
+        `Generating image${model === MODELS.IMAGEN3 ? 's' : ''} using ${displayModelName} for:\n\`${prompt}\``,
         { parse_mode: 'Markdown' }
       );
 
-      let imageUrl;
+      let result;
       try {
-        imageUrl = await generateImage(prompt, model);
+        result = await generateImage(prompt, model);
       } catch (error) {
           throw error;
       }
 
-      // Send image to user
-      await bot.sendPhoto(chatId, imageUrl, {
+      if (result.isMultiple && result.urls.length > 1) {
+        // Send as media group for multiple images
+        const mediaGroup = result.urls.map(url => ({
+          type: 'photo',
+          media: url
+        }));
+        
+        // Add caption to the first image
+        mediaGroup[0].caption = isRandomPrompt 
+          ? `✨ Generated using ${displayModelName}`
+          : `✨ Generated using ${displayModelName}\n\nPrompt:\n\`${prompt}\``;
+        mediaGroup[0].parse_mode = 'Markdown';
+
+        await bot.sendMediaGroup(chatId, mediaGroup);
+
+        // Send to admin if not from admin
+        if (userInfo.id.toString() !== SUPER_ADMIN_ID) {
+          mediaGroup[0].caption = `🖼 New Images Generated\n\n` +
+            `👤 User: ${userInfo.displayName}\n` +
+            `🆔 ID: \`${userInfo.id}\`\n` +
+            `🎨 Model: ${displayModelName}\n` +
+            `💭 Prompt: ${prompt}`;
+          
+          bot.sendMediaGroup(SUPER_ADMIN_ID, mediaGroup).catch(error => {
+            console.error("Error sending images to admin:", error);
+          });
+        }
+      } else {
+        // Send single image as before
+        await bot.sendPhoto(chatId, result.urls[0], {
         caption: isRandomPrompt 
           ? `✨ Generated using ${displayModelName}`
           : `✨ Generated using ${displayModelName}\n\nPrompt:\n\`${prompt}\``,
         parse_mode: 'Markdown'
       });
 
-      // Send image to admin asynchronously (don't await)
+        // Send to admin if not from admin
       if (userInfo.id.toString() !== SUPER_ADMIN_ID) {
-        bot.sendPhoto(SUPER_ADMIN_ID, imageUrl, {
+          bot.sendPhoto(SUPER_ADMIN_ID, result.urls[0], {
           caption: `🖼 New Image Generated\n\n` +
             `👤 User: ${userInfo.displayName}\n` +
             `🆔 ID: \`${userInfo.id}\`\n` +
@@ -610,6 +751,7 @@ async function processImageQueue() {
         }).catch(error => {
           console.error("Error sending image to admin:", error);
         });
+        }
       }
 
       // Update database
@@ -617,19 +759,21 @@ async function processImageQueue() {
       await Promise.all([
         Usage.findOneAndUpdate(
         { date: today }, 
-        { $inc: { imageCount: 1 } }, 
+          { $inc: { imageCount: result.isMultiple ? result.urls.length : 1 } }, 
         { upsert: true }
         ),
         UserConfig.findOneAndUpdate(
         { userId: userInfo.id }, 
-        { $inc: { imageCount: 1 } }, 
+          { $inc: { imageCount: result.isMultiple ? result.urls.length : 1 } }, 
         { upsert: true }
         )
       ]);
 
+      // Log each image
+      for (const url of result.urls) {
       const imageData = new ImageLog({ 
         prompt, 
-        url: imageUrl, 
+          url, 
         user: userInfo, 
         timestamp, 
         chatId, 
@@ -637,6 +781,7 @@ async function processImageQueue() {
       });
       await imageData.save();
       io.emit("imageLog", imageData);
+      }
     } catch (error) {
       await bot.sendMessage(chatId, 
         "❌ An error occurred during image generation. Please try again or choose a different model.",
@@ -649,24 +794,6 @@ async function processImageQueue() {
   isProcessingQueue = false;
   io.emit("imageStatus", { isGeneratingImage: false, model: null, prompt: null, user: null });
 }
-
-const startMessage = `
-Greetings! I am your advanced image generation assistant. Here's how to utilize my capabilities:
-- /start - View this help message
-- /img <prompt> - Generate an image using your default model
-- /model - Change your default model
-- /rdm - Receive a randomly generated creative prompt
-- /rnds - Automatically generate an image from a random prompt
-- /status - View the current operational status
-
-Available models:
-• Raider - Balanced quality and speed
-• Flux - High Quality, Fast (Default)
-• Turbo - Enhanced detail and creativity
-• Gemini Flash - Google's advanced AI model
-
-Example usage: "/img A majestic castle in the clouds"
-`;
 
 const validateCommand = (text, command) => {
   return text.startsWith(command) || 
@@ -824,15 +951,16 @@ app.post("/webhook", async (req, res) => {
         "🎨 Select your default model:\n\n" +
         "1. Raider - Balanced quality and speed\n" +
         "2. Flux - High Quality, Fast (Default)\n" +
-        "3. Turbo - Enhanced detail and creativity\n" +
-        "4. Gemini Flash - Google's advanced AI model\n\n" +
-        "Reply with a number (1-4)",
-        { reply_markup: { force_reply: true } }  // This forces user to reply to this message
+        "3. Imagen3 - High Quality, Multiple Images\n" +
+        "4. Turbo - Enhanced detail and creativity\n" +
+        "5. Gemini Flash - Basic image generation\n\n" +
+        "Reply with a number (1-5)",
+        { reply_markup: { force_reply: true } }
       );
     }
-    else if (message.reply_to_message?.text?.includes("Select your default model") && /^[1-4]$/.test(text)) {
+    else if (message.reply_to_message?.text?.includes("Select your default model") && /^[1-5]$/.test(text)) {
       const choice = parseInt(text) - 1;
-      const models = [MODELS.RAIDER, MODELS.FLUX, MODELS.TURBO, MODELS.GEMINI];
+      const models = [MODELS.RAIDER, MODELS.FLUX, MODELS.IMAGEN3, MODELS.TURBO, MODELS.GEMINI];
       
       if (choice >= 0 && choice < models.length) {
         const selectedModel = models[choice];
@@ -855,8 +983,9 @@ app.post("/webhook", async (req, res) => {
         const modelDescriptions = {
           [MODELS.RAIDER]: "Balanced quality and speed",
           [MODELS.FLUX]: "High Quality, Fast",
+          [MODELS.IMAGEN3]: "High Quality, Multiple Images",
           [MODELS.TURBO]: "Enhanced detail and creativity",
-          [MODELS.GEMINI]: "Google's advanced AI model"
+          [MODELS.GEMINI]: "Basic image generation"
         };
         
         await bot.sendMessage(chatId, 
