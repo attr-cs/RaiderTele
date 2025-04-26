@@ -569,7 +569,7 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1", a
         const imager = new AsyncMagicStudioImager();
         const images = await imager.generate(prompt, amount);
         
-        const savedFiles = await imager.save(images, prompt);
+       const savedFiles = await imager.save(images, prompt);
         const imageUrls = savedFiles.map(file => `${process.env.WEBHOOK_URL}/temp/${file.filename}`);
 
         return {
@@ -639,7 +639,7 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1", a
               const filePath = path.join(tempDir, fileName);
               
               const imageBuffer = Buffer.from(image.encodedImage, 'base64');
-              await fs.writeFile(filePath, imageBuffer);
+              // await fs.writeFile(filePath, imageBuffer);
               
               imageUrls.push(`${process.env.WEBHOOK_URL}/temp/${fileName}`);
             }
@@ -677,7 +677,7 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1", a
             const filePath = path.join(tempDir, fileName);
             
             const imageBuffer = Buffer.from(part.inlineData.data, 'base64');
-            await fs.writeFile(filePath, imageBuffer);
+            // await fs.writeFile(filePath, imageBuffer);
             
             return {
               urls: [`${process.env.WEBHOOK_URL}/temp/${fileName}`],
