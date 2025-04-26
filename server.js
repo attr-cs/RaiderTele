@@ -4,12 +4,15 @@ const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
 const { Server } = require("socket.io");
 const http = require("http");
+const https = require("https");
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const path = require("path");
-const fs = require("fs");
+const fs = require("fs").promises;
+const fsSync = require("fs");
 const crypto = require("crypto");
+const { v4: uuidv4 } = require("uuid");
 
 const app = express();
 const server = http.createServer(app);
@@ -28,7 +31,8 @@ const MODELS = {
   FLUX: "flux",
   TURBO: "turbo",
   GEMINI: "gemini",
-  IMAGEN3: "imagen3"
+  IMAGEN3: "imagen3",
+  MAGICSTUDIO: "magicstudio"
 };
 
 const modelNames = {
@@ -36,7 +40,8 @@ const modelNames = {
   [MODELS.FLUX]: "Flux",
   [MODELS.TURBO]: "Turbo",
   [MODELS.GEMINI]: "Gemini Flash 2.0",
-  [MODELS.IMAGEN3]: "Imagen3"
+  [MODELS.IMAGEN3]: "Imagen3",
+  [MODELS.MAGICSTUDIO]: "MagicStudio"
 };
 
 const genAI1 = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -77,18 +82,18 @@ const activeChats = new Set();
 const activeUsers = new Set();
 
 const tempDir = path.join('public', 'temp');
-if (!fs.existsSync(tempDir)) {
-  fs.mkdirSync(tempDir, { recursive: true });
+if (!fsSync.existsSync(tempDir)) {
+  fsSync.mkdirSync(tempDir, { recursive: true });
 }
 
 function cleanupTempFiles() {
-  const files = fs.readdirSync(tempDir);
+  const files = fsSync.readdirSync(tempDir);
   const now = Date.now();
   files.forEach(file => {
     const filePath = path.join(tempDir, file);
-    const stats = fs.statSync(filePath);
+    const stats = fsSync.statSync(filePath);
     if (now - stats.mtimeMs > 3600000) {
-      fs.unlinkSync(filePath);
+      fsSync.unlinkSync(filePath);
     }
   });
 }
@@ -126,6 +131,7 @@ Available models:
 • Imagen3 - High Quality, Multiple Images
 • Turbo - Enhanced detail and creativity
 • Gemini Flash - Basic image generation
+• MagicStudio - Fast, Multiple Images
 
 Example usage: "/img A majestic castle in the clouds"
 `;
@@ -156,185 +162,228 @@ Available models:
 • Imagen3 - High Quality, Multiple Images
 • Turbo - Enhanced detail and creativity
 • Gemini Flash - Basic image generation
+• MagicStudio- Fast, Multiple Images
 
 Example usage: "/img A majestic castle in the clouds"
 `;
 
-const USERS_PER_PAGE = 5; // Number of users to show per page
+const USERS_PER_PAGE = 5;
 
 const sessions = new Map();
+
+// MagicStudio Implementation
+class LitAgent {
+  constructor() {
+    this.userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
+    ];
+  }
+
+  random() {
+    return this.userAgents[Math.floor(Math.random() * this.userAgents.length)];
+  }
+}
+
+class AsyncMagicStudioImager {
+  constructor(timeout = 60) {
+    this.apiEndpoint = 'https://ai-api.magicstudio.com/api/ai-art-generator';
+    this.axiosInstance = axios.create({
+      httpsAgent: new https.Agent({ keepAlive: true, rejectUnauthorized: false })
+    });
+    this.litAgent = new LitAgent();
+    this.headers = {
+      'Accept': 'application/json',
+      'User-Agent': this.litAgent.random(),
+      'Origin': 'https://magicstudio.com',
+      'Referer': 'https://magicstudio.com/ai-art-generator/'
+    };
+    this.timeout = timeout;
+    this.imageExtension = 'jpg';
+  }
+
+  async generate(prompt, amount = 1, maxRetries = 2, retryDelay = 1000) {
+    if (!prompt) throw new Error('Prompt cannot be empty!');
+    if (!Number.isInteger(amount) || amount < 1 || amount > 10) throw new Error('Amount must be between 1 and 10!');
+
+    const tasks = Array.from({ length: amount }, async () => {
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          const formData = new URLSearchParams({
+            prompt,
+            output_format: 'bytes',
+            user_profile_id: 'null',
+            anonymous_user_id: uuidv4(),
+            request_timestamp: Date.now().toString(),
+            user_is_subscribed: 'false',
+            client_id: uuidv4().replace(/-/g, ''),
+            width: '3840',
+            height: '2160',
+            quality: 'high'
+          });
+
+          const config = {
+            headers: this.headers,
+            responseType: 'arraybuffer',
+            timeout: this.timeout * 1000
+          };
+
+          const response = await this.axiosInstance.post(this.apiEndpoint, formData, config);
+          if (!response.data || response.data.length === 0) {
+            throw new Error('Empty response from API');
+          }
+          return response.data;
+        } catch (error) {
+          if (attempt === maxRetries - 1) {
+            console.error(`Failed after ${maxRetries} attempts:`, error.message);
+            return null;
+          }
+          await new Promise(resolve => setTimeout(resolve, retryDelay * Math.pow(2, attempt)));
+        }
+      }
+    });
+
+    const results = await Promise.all(tasks);
+    const responses = results.filter(r => r);
+    if (responses.length === 0) {
+      throw new Error("No images generated. The prompt may contain NSFW or restricted content.");
+    }
+    return responses;
+  }
+
+  async save(response, name = 'image', dir = tempDir) {
+    try {
+      await fs.access(dir);
+    } catch {
+      await fs.mkdir(dir, { recursive: true });
+    }
+
+    const savedPaths = [];
+    const sanitizedName = name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const timestamp = Date.now();
+
+    for (let i = 0; i < response.length; i++) {
+      const filename = `magicstudio-${timestamp}-${i}-${Math.random().toString(36).substring(7)}.${this.imageExtension}`;
+      const filepath = path.join(dir, filename);
+      await fs.writeFile(filepath, Buffer.from(response[i]));
+      savedPaths.push({ filename, filepath });
+    }
+
+    return savedPaths;
+  }
+}
 
 async function generateRandomPrompt() {
   const timestamp = Date.now();
   const randomSeed = Math.floor(Math.random() * 1000000);
-  
+
   const themes = [
-    // High-Quality Scenes
     "cinematic cityscape", "golden hour landscape", "dramatic mountain vista", 
     "serene beach sunset", "misty forest morning", "urban street photography",
     "architectural masterpiece", "cozy cafe interior", "luxury penthouse view",
     "historic castle grounds", "modern art gallery", "japanese zen garden",
-
-    // Human-Centric (Professional/Artistic)
     "fashion photography", "street portrait", "dance performance",
     "artist in studio", "chef in kitchen", "musician on stage",
     "athlete in motion", "business professional", "traditional craftsman",
-    
-    // Modern Urban
     "modern downtown", "rooftop lounge", "subway station",
     "city park spring", "night market", "boutique shop",
     "urban garden", "coffee shop", "art district",
-    
-    // Nature & Landscapes
     "alpine lake sunrise", "desert oasis", "tropical beach",
     "autumn forest path", "rolling hills", "crystal cave",
     "northern lights", "cherry blossom garden", "waterfall vista",
-    
-    // Architecture & Interiors
     "modern minimalist", "art deco interior", "gothic cathedral",
     "japanese temple", "scandinavian home", "mediterranean villa",
     "industrial loft", "luxury hotel lobby", "bohemian studio",
-    
-    // Technology & Future
     "smart city", "tech workspace", "innovation lab",
     "electric vehicle", "sustainable architecture", "digital art gallery",
     "modern laboratory", "space observatory", "green technology",
-
-    // Ancient Indian & Hindu Themes
     "ancient vedic ceremony", "rishis meditating in himalayas", "temple architecture",
     "krishna's divine garden", "ancient gurukul", "sacred river ganges",
-    "ayodh-ya palace", "himalayan ashram", "ancient sanskrit library",
+    "ayodhya palace", "himalayan ashram", "ancient sanskrit library",
     "meditation caves", "sacred banyan tree", "temple courtyard",
-    
-    // Natural Wonders
     "himalayan peaks sunrise", "kerala backwaters", "rajasthan desert",
     "valley of flowers", "sundarbans mangrove", "western ghats monsoon",
     "ladakh monastery", "varanasi ghats", "konark sun temple",
-    
-    // Cultural Heritage
     "classical dance performance", "traditional artisan workshop", "ancient marketplace",
     "royal durbar hall", "traditional spice market", "temple festival",
     "classical music concert", "traditional weaver's studio", "ancient astronomical observatory",
-    
-    // Modern India
     "modern mumbai skyline", "tech hub bangalore", "delhi metro station",
     "contemporary art gallery", "fusion restaurant", "urban garden",
-    
-    // Nostalgic Scenes
     "vintage railway station", "old haveli courtyard", "traditional village life",
     "ancient stepwell", "heritage street", "traditional pottery workshop",
-    
-    // Epic Scenes
     "kurukshetra battlefield", "ram setu sunrise", "ancient ayodhya",
     "dwaraka kingdom", "himalayan meditation cave", "sacred forest ashram",
-
-    // Ancient Civilizations
     "mesopotamian ziggurat", "egyptian temple complex", "roman forum at dawn",
     "mayan pyramid ceremony", "angkor wat sunrise", "petra treasury night",
     "ancient chinese palace", "greek acropolis sunset", "persian gardens",
     "viking longship harbor", "aztec temple market", "celtic stone circle",
-
-    // Indian Classical
     "ajanta caves artwork", "ellora temple complex", "thanjavur palace",
     "hampi ruins sunset", "khajuraho temples", "badami cave temples",
     "mahabalipuram shore temple", "golden temple amritsar", "mysore palace diwali",
     "fatehpur sikri court", "amber fort jaipur", "meenakshi temple madurai",
-
-    // Sacred & Spiritual
     "kailash mansarovar", "kedarnath temple snow", "badrinath peaks",
     "jagannath puri temple", "tirupati temple dawn", "somnath temple sunset",
     "rameshwaram corridors", "kashi vishwanath ghat", "bodh gaya morning",
     "haridwar aarti ceremony", "rishikesh ashram", "belur math architecture",
-
-    // Modern Architectural Marvels
     "burj khalifa twilight", "singapore gardens night", "dubai future city",
     "shanghai skyscraper reflections", "tokyo tower rain", "sydney opera house dawn",
     "manhattan aerial sunset", "london shard fog", "moscow city lights",
     "toronto cn tower aurora", "hong kong harbor night", "doha skyline dusk",
-
-    // Natural Phenomena
     "aurora borealis iceland", "sahara desert stars", "great barrier reef",
     "grand canyon lightning", "mount everest sunrise", "victoria falls rainbow",
     "pamukkale thermal pools", "zhangjiajie peaks mist", "antelope canyon light",
     "iceland black beach", "norwegian fjords", "swiss alps glacier",
-
-    // Cultural Heritage
     "japanese tea ceremony", "venetian carnival", "moroccan souk",
     "turkish grand bazaar", "chinese lantern festival", "thai songkran",
     "rio carnival parade", "spanish flamenco", "african tribal ceremony",
     "mongolian eagle hunters", "tibetan butter festival", "irish celtic celebration",
-
-    // Contemporary Urban
     "seoul digital district", "melbourne street art", "berlin wall gallery",
     "amsterdam canal homes", "prague old town square", "kyoto modern contrast",
     "barcelona gothic quarter", "san francisco fog", "chicago river walk",
     "copenhagen bicycle culture", "vienna coffee house", "lisbon tram street",
-
-    // Industrial & Scientific
     "nasa launch facility", "CERN particle detector", "robotics laboratory",
     "hydroelectric dam", "solar farm aerial", "wind turbine farm sunset",
     "submarine dock facility", "aircraft carrier deck", "space station module",
     "quantum computer lab", "fusion reactor core", "deep sea research station",
-
-    // Traditional Arts
     "kabuki theater performance", "kathakali dancer", "beijing opera",
     "ballet rehearsal studio", "symphony orchestra", "glass blowing workshop",
     "marble sculpture studio", "woodblock printing", "ceramic pottery wheel",
     "weaving loom workshop", "metalsmith forge", "calligraphy master",
-
-    // Modern Art & Design
     "contemporary art gallery", "fashion runway show", "design studio workspace",
     "modern dance performance", "digital art installation", "architectural model room",
     "photography darkroom", "recording studio session", "film set lighting",
     "virtual reality lab", "3D printing facility", "motion capture studio",
-
-    // Historical Moments
     "silk road caravan", "medieval tournament", "renaissance workshop",
     "industrial revolution factory", "1920s jazz club", "1950s diner",
     "ancient olympic games", "samurai dojo", "victorian conservatory",
     "colonial trading port", "wild west saloon", "art deco cinema",
-
-    // Futuristic
     "vertical farm interior", "hyperloop station", "quantum city",
     "mars colony dome", "underwater metropolis", "floating sky city",
     "hologram market", "anti-gravity park", "space elevator base",
     "fusion powered city", "bio-luminescent architecture", "nanotech laboratory",
-
-    // Intimate Spaces
     "artisan coffee roastery", "vintage bookstore", "secret garden",
     "greenhouse conservatory", "artist's loft", "watchmaker's workshop",
     "perfume laboratory", "chocolatier kitchen", "violin maker's studio",
     "botanical research lab", "vintage camera shop", "traditional barbershop",
-
-    // Epic Landscapes
     "himalayan monastery", "amazon rainforest canopy", "mongolian steppes",
     "scottish highlands", "new zealand fjords", "indonesian volcanos",
     "namibian desert", "canadian rockies", "patagonian peaks",
     "arctic ice caves", "brazilian waterfalls", "australian outback",
-
-    // Ancient Indian Epics & Mythology
     "krishna's raas leela", "hanuman carrying mountain", "arjuna's archery",
     "rama's coronation", "vishnu on sheshnag", "shiva's meditation",
     "ganga's descent", "buddha's enlightenment", "ashoka's court",
     "chandragupta's durbar", "nalanda university", "takshashila campus",
-
-    // Sacred Architecture
     "kailasa temple ellora", "brihadeshwara dawn", "konark wheel detail",
     "martand sun temple", "dilwara marble work", "aihole temples",
     "pattadakal complex", "modhera sun steps", "sanchi stupa sunrise",
     "elephanta caves", "lepakshi pillars", "vittala temple hampi",
-
-    // Traditional Sciences
     "ancient observatory", "ayurvedic garden", "vedic mathematics class",
     "astronomical instruments", "traditional metallurgy", "ancient surgical tools",
     "water harvesting system", "ancient textile workshop", "medicinal herb garden",
-
-    // Modern Masterpieces
     "lotus temple dusk", "akshardham reflection", "bandra worli sea link",
     "howrah bridge fog", "metro art station", "cyber hub gurgaon",
-    "international airport terminal", "modern museum interior", "tech park sunrise",
-
-    // [... hundreds more themes organized by category ...]
+    "international airport terminal", "modern museum interior", "tech park sunrise"
   ];
 
   const styles = [
@@ -448,17 +497,17 @@ async function generateRandomPrompt() {
     "medium format quality", "cinematic color grading", "professional retouching"
   ];
 
-  const randomTheme = themes[Math.floor(Math.random() * themes.length)];
-  const randomStyle = styles[Math.floor(Math.random() * styles.length)];
-  const randomMood = moods[Math.floor(Math.random() * moods.length)];
-  const randomTime = timeOfDay[Math.floor(Math.random() * timeOfDay.length)];
-  const randomPerspective = perspectives[Math.floor(Math.random() * perspectives.length)];
-  const randomLighting = lighting[Math.floor(Math.random() * lighting.length)];
-  const randomAtmosphere = atmospheres[Math.floor(Math.random() * atmospheres.length)];
-  const randomTexture = textures[Math.floor(Math.random() * textures.length)];
-  const randomColor = colors[Math.floor(Math.random() * colors.length)];
-  const randomComposition = compositions[Math.floor(Math.random() * compositions.length)];
-  const randomQuality = qualityEnhancements[Math.floor(Math.random() * qualityEnhancements.length)];
+  const randomTheme = themes[Math.floor(Math.random() * themes.length)] || "generic scene";
+  const randomStyle = styles[Math.floor(Math.random() * styles.length)] || "photorealistic";
+  const randomMood = moods[Math.floor(Math.random() * moods.length)] || "neutral";
+  const randomTime = timeOfDay[Math.floor(Math.random() * timeOfDay.length)] || "daytime";
+  const randomPerspective = perspectives[Math.floor(Math.random() * perspectives.length)] || "eye level";
+  const randomLighting = lighting[Math.floor(Math.random() * lighting.length)] || "natural light";
+  const randomAtmosphere = atmospheres[Math.floor(Math.random() * atmospheres.length)] || "clear";
+  const randomTexture = textures[Math.floor(Math.random() * textures.length)] || "smooth";
+  const randomColor = colors[Math.floor(Math.random() * colors.length)] || "natural tones";
+  const randomComposition = compositions[Math.floor(Math.random() * compositions.length)] || "balanced";
+  const randomQuality = qualityEnhancements[Math.floor(Math.random() * qualityEnhancements.length)] || "high quality";
 
   const systemPrompt = `Create a single high-quality image generation prompt.
 Theme: "${randomTheme}"
@@ -481,39 +530,27 @@ Rules:
 Example format: "Ultra-detailed 8K photograph of [scene description], [lighting details], [atmosphere], [technical aspects], photorealistic quality"`;
   
   try {
-    // First try with Gemini API 1
     try {
       const model = genAI1.getGenerativeModel({ model: "gemini-2.0-flash" });
       const result = await model.generateContent(systemPrompt);
       return result.response.text().trim();
     } catch (error) {
       console.error("First Gemini API key failed:", error);
-      
-      // Second try with Gemini API 2
       try {
-      const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
-      const result = await model.generateContent(systemPrompt);
-      return result.response.text().trim();
+        const model = genAI2.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const result = await model.generateContent(systemPrompt);
+        return result.response.text().trim();
       } catch (error) {
         console.error("Second Gemini API key failed:", error);
-        
-        // Fallback to Pollinations text API
         const response = await axios.post('https://text.pollinations.ai/', {
           messages: [
-            {
-              role: "system",
-              content: systemPrompt
-            },
-            {
-              role: "user",
-              content: "Generate a unique image prompt"
-            }
+            { role: "system", content: systemPrompt },
+            { role: "user", content: "Generate a unique image prompt" }
           ],
           model: "mistral",
           private: true,
           seed: randomSeed
         });
-        
         return response.data.trim();
       }
     }
@@ -523,11 +560,27 @@ Example format: "Ultra-detailed 8K photograph of [scene description], [lighting 
   }
 }
 
-async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
+async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1", amount = 1) {
   try {
     const seed = Math.floor(Math.random() * 999999) + 1;
     
-    if (model === MODELS.IMAGEN3) {
+    if (model === MODELS.MAGICSTUDIO) {
+      try {
+        const imager = new AsyncMagicStudioImager();
+        const images = await imager.generate(prompt, amount);
+        
+        const savedFiles = await imager.save(images, prompt);
+        const imageUrls = savedFiles.map(file => `${process.env.WEBHOOK_URL}/temp/${file.filename}`);
+
+        return {
+          urls: imageUrls,
+          isMultiple: imageUrls.length > 1
+        };
+      } catch (error) {
+        console.error("MagicStudio image generation failed:", error.message);
+        throw error;
+      }
+    } else if (model === MODELS.IMAGEN3) {
       try {
         const data = {
           userInput: {
@@ -586,7 +639,7 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
               const filePath = path.join(tempDir, fileName);
               
               const imageBuffer = Buffer.from(image.encodedImage, 'base64');
-              fs.writeFileSync(filePath, imageBuffer);
+              await fs.writeFile(filePath, imageBuffer);
               
               imageUrls.push(`${process.env.WEBHOOK_URL}/temp/${fileName}`);
             }
@@ -624,7 +677,7 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
             const filePath = path.join(tempDir, fileName);
             
             const imageBuffer = Buffer.from(part.inlineData.data, 'base64');
-            fs.writeFileSync(filePath, imageBuffer);
+            await fs.writeFile(filePath, imageBuffer);
             
             return {
               urls: [`${process.env.WEBHOOK_URL}/temp/${fileName}`],
@@ -660,7 +713,6 @@ async function generateImage(prompt, model = MODELS.FLUX, aspectRatio = "1:1") {
         isMultiple: false
       };
     } else {
-      // For FLUX, TURBO and any other models
       const encodedPrompt = encodeURIComponent(prompt);
       const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&seed=${seed}&private=true&safe=false&aspect_ratio=${aspectRatio}`;
       return {
@@ -679,7 +731,7 @@ async function processImageQueue() {
   isProcessingQueue = true;
 
   while (imageGenerationQueue.length > 0) {
-    const { chatId, prompt, model, userInfo, isRandomPrompt } = imageGenerationQueue.shift();
+    const { chatId, prompt, model, userInfo, isRandomPrompt, amount } = imageGenerationQueue.shift();
     const timestamp = new Date().toISOString();
     let displayModelName = modelNames[model] || model;
 
@@ -692,25 +744,31 @@ async function processImageQueue() {
       });
       
       await bot.sendMessage(chatId, 
-        `Generating image${model === MODELS.IMAGEN3 ? 's' : ''} using ${displayModelName} for:\n\`${prompt}\``,
+        `Generating image${model === MODELS.IMAGEN3 || model === MODELS.MAGICSTUDIO ? 's' : ''} using ${displayModelName} for:\n\`${prompt}\``,
         { parse_mode: 'Markdown' }
       );
 
       let result;
       try {
-        result = await generateImage(prompt, model);
+        result = await generateImage(prompt, model, "1:1", amount || 1);
       } catch (error) {
-          throw error;
+        if (model === MODELS.MAGICSTUDIO && error.message.includes("NSFW or restricted content")) {
+          await bot.sendMessage(chatId, 
+            "❌ Image generation failed. The prompt may contain NSFW or restricted content. Please try a different prompt.",
+            { parse_mode: 'Markdown' }
+          );
+          io.emit("log", { type: "ERROR", message: error.message, timestamp });
+          continue;
+        }
+        throw error;
       }
 
       if (result.isMultiple && result.urls.length > 1) {
-        // Send as media group for multiple images
         const mediaGroup = result.urls.map(url => ({
           type: 'photo',
           media: url
         }));
         
-        // Add caption to the first image
         mediaGroup[0].caption = isRandomPrompt 
           ? `✨ Generated using ${displayModelName}`
           : `✨ Generated using ${displayModelName}\n\nPrompt:\n\`${prompt}\``;
@@ -718,7 +776,6 @@ async function processImageQueue() {
 
         await bot.sendMediaGroup(chatId, mediaGroup);
 
-        // Send to admin if not from admin
         if (userInfo.id.toString() !== SUPER_ADMIN_ID) {
           mediaGroup[0].caption = `🖼 New Images Generated\n\n` +
             `👤 User: ${userInfo.displayName}\n` +
@@ -731,56 +788,52 @@ async function processImageQueue() {
           });
         }
       } else {
-        // Send single image as before
         await bot.sendPhoto(chatId, result.urls[0], {
-        caption: isRandomPrompt 
-          ? `✨ Generated using ${displayModelName}`
-          : `✨ Generated using ${displayModelName}\n\nPrompt:\n\`${prompt}\``,
-        parse_mode: 'Markdown'
-      });
-
-        // Send to admin if not from admin
-      if (userInfo.id.toString() !== SUPER_ADMIN_ID) {
-          bot.sendPhoto(SUPER_ADMIN_ID, result.urls[0], {
-          caption: `🖼 New Image Generated\n\n` +
-            `👤 User: ${userInfo.displayName}\n` +
-            `🆔 ID: \`${userInfo.id}\`\n` +
-            `🎨 Model: ${displayModelName}\n` +
-            `💭 Prompt: ${prompt}`,
+          caption: isRandomPrompt 
+            ? `✨ Generated using ${displayModelName}`
+            : `✨ Generated using ${displayModelName}\n\nPrompt:\n\`${prompt}\``,
           parse_mode: 'Markdown'
-        }).catch(error => {
-          console.error("Error sending image to admin:", error);
         });
+
+        if (userInfo.id.toString() !== SUPER_ADMIN_ID) {
+          bot.sendPhoto(SUPER_ADMIN_ID, result.urls[0], {
+            caption: `🖼 New Image Generated\n\n` +
+              `👤 User: ${userInfo.displayName}\n` +
+              `🆔 ID: \`${userInfo.id}\`\n` +
+              `🎨 Model: ${displayModelName}\n` +
+              `💭 Prompt: ${prompt}`,
+            parse_mode: 'Markdown'
+          }).catch(error => {
+            console.error("Error sending image to admin:", error);
+          });
         }
       }
 
-      // Update database
       const today = new Date().toISOString().split("T")[0];
       await Promise.all([
         Usage.findOneAndUpdate(
-        { date: today }, 
+          { date: today }, 
           { $inc: { imageCount: result.isMultiple ? result.urls.length : 1 } }, 
-        { upsert: true }
+          { upsert: true }
         ),
         UserConfig.findOneAndUpdate(
-        { userId: userInfo.id }, 
+          { userId: userInfo.id }, 
           { $inc: { imageCount: result.isMultiple ? result.urls.length : 1 } }, 
-        { upsert: true }
+          { upsert: true }
         )
       ]);
 
-      // Log each image
       for (const url of result.urls) {
-      const imageData = new ImageLog({ 
-        prompt, 
+        const imageData = new ImageLog({ 
+          prompt, 
           url, 
-        user: userInfo, 
-        timestamp, 
-        chatId, 
-        model 
-      });
-      await imageData.save();
-      io.emit("imageLog", imageData);
+          user: userInfo, 
+          timestamp, 
+          chatId, 
+          model 
+        });
+        await imageData.save();
+        io.emit("imageLog", imageData);
       }
     } catch (error) {
       await bot.sendMessage(chatId, 
@@ -836,12 +889,10 @@ app.post("/webhook", async (req, res) => {
   const timestamp = new Date().toISOString();
   const isSuperAdmin = userInfo.id.toString() === SUPER_ADMIN_ID;
 
-  // Allow admin commands even when bot is stopped
   if (!botRunning && !isSuperAdmin) {
     return res.sendStatus(200);
   }
 
-  // Special handling for bot control commands when bot is stopped
   if (!botRunning && isSuperAdmin) {
     if (validateCommand(text, "/start_bot")) {
       botRunning = true;
@@ -852,7 +903,6 @@ app.post("/webhook", async (req, res) => {
     return res.sendStatus(200);
   }
 
-  // Check if user is blocked (except for super admin)
   if (userInfo.id.toString() !== SUPER_ADMIN_ID) {
     const userConfig = await UserConfig.findOne({ userId: userInfo.id });
     if (userConfig?.isBlocked) {
@@ -863,8 +913,6 @@ app.post("/webhook", async (req, res) => {
     }
   }
 
-  // Notify super admin about new messages (except their own messages)
-  
   if (!isSuperAdmin) {
     const notificationText = `New message from user:
 👤 User: ${userInfo.displayName}
@@ -915,7 +963,7 @@ app.post("/webhook", async (req, res) => {
         const randomPrompt = await generateRandomPrompt();
         await bot.sendMessage(chatId, 
           `🎨 Random Prompt:\n\`${randomPrompt}\``, 
-          { parse_mode: 'Markdown' }  // Only keeping Markdown formatting for copiable text
+          { parse_mode: 'Markdown' }
         );
       } catch (error) {
         console.error("Random prompt generation error:", error);
@@ -928,20 +976,27 @@ app.post("/webhook", async (req, res) => {
         const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.FLUX };
         let model = userConfig.defaultModel;
         
-        imageGenerationQueue.push({ 
-          chatId, 
-          prompt: randomPrompt, 
-          model, 
-          userInfo,
-          isRandomPrompt: true // Add this flag
-        });
+        if (model === MODELS.MAGICSTUDIO) {
+          await bot.sendMessage(chatId, 
+            "MagicStudio requires a specific number of images. Reply with a number (1-10) for this random prompt generation.",
+            { reply_markup: { force_reply: true } }
+          );
+          sessions.set(chatId, { awaitingAmount: true, prompt: randomPrompt, model, userInfo, isRandomPrompt: true });
+        } else {
+          imageGenerationQueue.push({ 
+            chatId, 
+            prompt: randomPrompt, 
+            model, 
+            userInfo,
+            isRandomPrompt: true
+          });
 
-        await bot.sendMessage(chatId, 
-          // `🎨 Queued random prompt for generation:\n\`${randomPrompt}\`\n\nModel: ${modelNames[model]}`,
-          `🎨 Queued random prompt for generation...`
-        );
-        
-        processImageQueue();
+          await bot.sendMessage(chatId, 
+            `🎨 Queued random prompt for generation...`
+          );
+          
+          processImageQueue();
+        }
       } catch (error) {
         await bot.sendMessage(chatId, "Failed to generate image. Please try again.");
       }
@@ -953,14 +1008,15 @@ app.post("/webhook", async (req, res) => {
         "2. Flux - High Quality, Fast (Default)\n" +
         "3. Imagen3 - High Quality, Multiple Images\n" +
         "4. Turbo - Enhanced detail and creativity\n" +
-        "5. Gemini Flash - Basic image generation\n\n" +
-        "Reply with a number (1-5)",
+        "5. Gemini Flash - Basic image generation\n" +
+        "6. MagicStudio - Fast, Multiple Images\n\n" +
+        "Reply with a number (1-6)",
         { reply_markup: { force_reply: true } }
       );
     }
-    else if (message.reply_to_message?.text?.includes("Select your default model") && /^[1-5]$/.test(text)) {
+    else if (message.reply_to_message?.text?.includes("Select your default model") && /^[1-6]$/.test(text)) {
       const choice = parseInt(text) - 1;
-      const models = [MODELS.RAIDER, MODELS.FLUX, MODELS.IMAGEN3, MODELS.TURBO, MODELS.GEMINI];
+      const models = [MODELS.RAIDER, MODELS.FLUX, MODELS.IMAGEN3, MODELS.TURBO, MODELS.GEMINI, MODELS.MAGICSTUDIO];
       
       if (choice >= 0 && choice < models.length) {
         const selectedModel = models[choice];
@@ -985,7 +1041,8 @@ app.post("/webhook", async (req, res) => {
           [MODELS.FLUX]: "High Quality, Fast",
           [MODELS.IMAGEN3]: "High Quality, Multiple Images",
           [MODELS.TURBO]: "Enhanced detail and creativity",
-          [MODELS.GEMINI]: "Basic image generation"
+          [MODELS.GEMINI]: "Basic image generation",
+          [MODELS.MAGICSTUDIO]: "Fast, Multiple Images"
         };
         
         await bot.sendMessage(chatId, 
@@ -994,6 +1051,38 @@ app.post("/webhook", async (req, res) => {
           `Use /img with a prompt to generate images!`
         );
       }
+    }
+    else if (message.reply_to_message?.text?.includes("Reply with a number (1-10)") && sessions.get(chatId)?.awaitingAmount) {
+      const session = sessions.get(chatId);
+      const amount = parseInt(text);
+      
+      if (isNaN(amount) || amount < 1 || amount > 10) {
+        await bot.sendMessage(chatId, 
+          "⚠️ Invalid number. Please reply with a number between 1 and 10.",
+          { reply_markup: { force_reply: true } }
+        );
+        return res.sendStatus(200);
+      }
+
+      imageGenerationQueue.push({ 
+        chatId, 
+        prompt: session.prompt, 
+        model: session.model, 
+        userInfo: session.userInfo, 
+        amount,
+        isRandomPrompt: session.isRandomPrompt || false
+      });
+
+      await bot.sendMessage(chatId, 
+        `🖼 Image generation queued!\n\n` +
+        `Prompt: "${session.prompt}"\n` +
+        `Model: ${modelNames[session.model]}\n` +
+        `Number of images: ${amount}\n` +
+        `Queue position: ${imageGenerationQueue.length}`
+      );
+
+      sessions.delete(chatId);
+      processImageQueue();
     }
     else if (validateCommand(text, "/img") || (message.reply_to_message?.from?.username === BOT_USERNAME)) {
       let prompt = text.replace(/^\/img/i, "").trim();
@@ -1009,17 +1098,24 @@ app.post("/webhook", async (req, res) => {
       const userConfig = await UserConfig.findOne({ userId: userInfo.id }) || { defaultModel: MODELS.FLUX };
       const model = userConfig.defaultModel;
 
-      imageGenerationQueue.push({ chatId, prompt, model, userInfo });
-      await bot.sendMessage(chatId, 
-        `🖼 Image generation queued!\n\n` +
-        `Prompt: "${prompt}"\n` +
-        `Model: ${modelNames[model]}\n` +
-        `Queue position: ${imageGenerationQueue.length}`
-      );
-      processImageQueue();
+      if (model === MODELS.MAGICSTUDIO) {
+        await bot.sendMessage(chatId, 
+          "How many images would you like to generate with MagicStudio? Reply with a number (1-10).",
+          { reply_markup: { force_reply: true } }
+        );
+        sessions.set(chatId, { awaitingAmount: true, prompt, model, userInfo });
+      } else {
+        imageGenerationQueue.push({ chatId, prompt, model, userInfo });
+        await bot.sendMessage(chatId, 
+          `🖼 Image generation queued!\n\n` +
+          `Prompt: "${prompt}"\n` +
+          `Model: ${modelNames[model]}\n` +
+          `Queue position: ${imageGenerationQueue.length}`
+        );
+        processImageQueue();
+      }
     }
 
-    // Add super admin commands
     if (isSuperAdmin) {
       if (validateCommand(text, "/users")) {
         try {
@@ -1053,7 +1149,6 @@ app.post("/webhook", async (req, res) => {
             timestamp: { $gte: new Date().setHours(0, 0, 0, 0) }
           });
           
-          // Get top users
           const topUsers = await UserConfig.find()
             .sort({ imageCount: -1 })
             .limit(5);
@@ -1103,7 +1198,7 @@ app.post("/webhook", async (req, res) => {
             }
           }
         
-        await bot.sendMessage(chatId, 
+          await bot.sendMessage(chatId, 
             `📨 Broadcast Results:\n✅ Sent: ${sent}\n❌ Failed: ${failed}`
           );
         } catch (error) {
@@ -1111,7 +1206,6 @@ app.post("/webhook", async (req, res) => {
         }
       }
       
-      // Add image generation notification
       if (imageGenerationQueue.length > 0) {
         const lastImage = imageGenerationQueue[imageGenerationQueue.length - 1];
         if (lastImage.userInfo.id !== SUPER_ADMIN_ID) {
@@ -1131,7 +1225,7 @@ app.post("/webhook", async (req, res) => {
           botRunning = false;
           io.emit("log", { type: "INFO", message: "Bot stopped", timestamp: new Date().toISOString() });
           await bot.sendMessage(chatId, "🛑 Bot has been stopped");
-      } else {
+        } else {
           await bot.sendMessage(chatId, "ℹ️ Bot is already stopped");
         }
       }
@@ -1159,7 +1253,6 @@ app.post("/webhook", async (req, res) => {
             `✅ User ${user.user?.displayName || userId} has been blocked.`
           );
 
-          // Notify the blocked user
           try {
             await bot.sendMessage(userId, 
               "⚠️ Your access to this bot has been restricted by the administrator."
@@ -1196,7 +1289,6 @@ app.post("/webhook", async (req, res) => {
             `✅ User ${user.user?.displayName || userId} has been unblocked.`
           );
 
-          // Notify the unblocked user
           try {
             await bot.sendMessage(userId, 
               "✅ Your access to this bot has been restored by the administrator."
@@ -1210,7 +1302,6 @@ app.post("/webhook", async (req, res) => {
         }
       }
     } else if (text.startsWith("/") && ["/users", "/stats", "/broadcast", "/start_bot", "/stop_bot", "/block", "/unblock"].some(cmd => validateCommand(text, cmd))) {
-      // If a non-admin user tries to use admin commands
       await bot.sendMessage(chatId, "⚠️ You don't have permission to use this command.");
       return res.sendStatus(200);
     }
@@ -1238,14 +1329,13 @@ app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 });
 
-// Update the callback query handler
 bot.on('callback_query', async (query) => {
   try {
-  const chatId = query.message.chat.id;
+    const chatId = query.message.chat.id;
 
-  if (query.data.startsWith('users_')) {
-    const page = parseInt(query.data.split('_')[1]);
-      await bot.answerCallbackQuery(query.id); // Acknowledge the callback query immediately
+    if (query.data.startsWith('users_')) {
+      const page = parseInt(query.data.split('_')[1]);
+      await bot.answerCallbackQuery(query.id);
       
       const totalUsers = await UserConfig.countDocuments();
       const totalPages = Math.ceil(totalUsers / USERS_PER_PAGE);
@@ -1310,17 +1400,17 @@ bot.on('callback_query', async (query) => {
     }
   } catch (error) {
     console.error("Error in callback query handler:", error);
-      await bot.answerCallbackQuery(query.id, { 
+    await bot.answerCallbackQuery(query.id, { 
       text: "Error loading page. Please try again.",
-        show_alert: true 
-      });
+      show_alert: true 
+    });
   }
 });
 
 io.on("connection", (socket) => {
   socket.on("adminLogin", async (password) => {
     try {
-    const isValid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
+      const isValid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
       if (isValid) {
         const token = crypto.randomBytes(32).toString('hex');
         sessions.set(token, {
@@ -1347,7 +1437,7 @@ io.on("connection", (socket) => {
 
   socket.on("verifyToken", (token) => {
     const session = sessions.get(token);
-    if (session && (Date.now() - session.timestamp) < 24 * 60 * 60 * 1000) { // 24 hour expiry
+    if (session && (Date.now() - session.timestamp) < 24 * 60 * 60 * 1000) {
       sessions.set(token, {
         timestamp: Date.now(),
         socketId: socket.id
@@ -1403,7 +1493,6 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-// Add this function to update user info periodically
 async function updateUserInfo() {
   try {
     const users = await UserConfig.find().lean();
@@ -1436,10 +1525,7 @@ async function updateUserInfo() {
   }
 }
 
-// Run user info update every 24 hours
 setInterval(updateUserInfo, 24 * 60 * 60 * 1000);
-
-// Run it once when the server starts
 updateUserInfo();
 
 server.listen(PORT, () => {

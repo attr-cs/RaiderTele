@@ -4,6 +4,7 @@
     "@google/generative-ai": "^0.24.0",
     "axios": "^1.8.3",
     "bcrypt": "^5.1.1",
+    "bullmq": "^5.49.2",
     "chalk": "^5.4.1",
     "chart.js": "^4.4.8",
     "dotenv": "^16.4.7",
@@ -13,6 +14,7 @@
     "https-proxy-agent": "^7.0.6",
     "mongoose": "^8.12.1",
     "node-telegram-bot-api": "^0.66.0",
+    "redis": "^4.7.0",
     "socket.io": "^4.8.1",
     "telegram": "^2.26.22"
   }
